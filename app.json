@@ -6,23 +6,47 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app needs access to location to show nearby services.",
+        "NSLocationAlwaysUsageDescription": "This app needs access to location to show nearby services."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "experiments": {
+      "tsconfigPaths": true,
+      "bridgeless": false
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "newArchEnabled": true,
+    "sdkVersion": "52.0.0",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow PrimMobile to use your location to show nearby services."
+        }
+      ]
+    ]
   }
 }
