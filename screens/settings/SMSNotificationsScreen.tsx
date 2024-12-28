@@ -1,73 +1,70 @@
-import React, { useState } from 'react';
-import { View, Switch } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React from 'react';
+import { View, StyleSheet, Switch } from 'react-native';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
-import { SettingsSection, SettingsRow } from '../../components/SettingsComponents';
+import { Typography } from '../../components/Typography';
 
 export const SMSNotificationsScreen = () => {
-  const navigation = useNavigation();
-  const [settings, setSettings] = useState({
-    newBookings: true,
-    bookingReminders: true,
-    cancellations: true,
-    emergencyUpdates: true,
+  const [notifications, setNotifications] = React.useState({
+    bookings: true,
+    reminders: true,
   });
 
-  const handleSave = () => {
-    // TODO: Implement save functionality
-    navigation.goBack();
-  };
-
-  const toggleSetting = (key: keyof typeof settings) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
-
   return (
-    <BaseSettingsScreen
-      title="SMS Notifications"
-      onSave={handleSave}
-    >
-      <SettingsSection title="SMS Alerts">
-        <SettingsRow
-          label="New Bookings"
-          value={
-            <Switch
-              value={settings.newBookings}
-              onValueChange={() => toggleSetting('newBookings')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Booking Reminders"
-          value={
-            <Switch
-              value={settings.bookingReminders}
-              onValueChange={() => toggleSetting('bookingReminders')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Cancellations"
-          value={
-            <Switch
-              value={settings.cancellations}
-              onValueChange={() => toggleSetting('cancellations')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Emergency Updates"
-          value={
-            <Switch
-              value={settings.emergencyUpdates}
-              onValueChange={() => toggleSetting('emergencyUpdates')}
-            />
-          }
-        />
-      </SettingsSection>
+    <BaseSettingsScreen title="SMS Notifications">
+      <View style={styles.container}>
+        <View style={styles.settingItem}>
+          <View style={styles.settingText}>
+            <Typography variant="body1" style={styles.settingTitle}>Booking Updates</Typography>
+            <Typography variant="body2" style={styles.settingDescription}>
+              SMS messages about new, modified, or cancelled bookings
+            </Typography>
+          </View>
+          <Switch
+            value={notifications.bookings}
+            onValueChange={(value) => setNotifications(prev => ({ ...prev, bookings: value }))}
+          />
+        </View>
+
+        <View style={styles.settingItem}>
+          <View style={styles.settingText}>
+            <Typography variant="body1" style={styles.settingTitle}>Reminders</Typography>
+            <Typography variant="body2" style={styles.settingDescription}>
+              Upcoming appointment reminders
+            </Typography>
+          </View>
+          <Switch
+            value={notifications.reminders}
+            onValueChange={(value) => setNotifications(prev => ({ ...prev, reminders: value }))}
+          />
+        </View>
+      </View>
     </BaseSettingsScreen>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  settingText: {
+    flex: 1,
+    marginRight: 16,
+  },
+  settingTitle: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+});

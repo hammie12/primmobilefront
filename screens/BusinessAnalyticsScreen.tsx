@@ -1,14 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { BusinessNavigationBar } from '../components/BusinessNavigationBar';
 import { BusinessTopBar } from '../components/BusinessTopBar';
 import { StatusBar } from 'expo-status-bar';
 
 export const BusinessAnalyticsScreen = () => {
   const renderMetricCard = (title: string, value: string, change: string, isPositive: boolean) => (
     <View style={styles.metricCard}>
-      <Text style={styles.metricTitle}>{title}</Text>
+      <Text style={styles.metricTitle}>{title}</Text>  
       <Text style={styles.metricValue}>{value}</Text>
       <View style={styles.changeContainer}>
         <MaterialCommunityIcons 
@@ -45,10 +44,10 @@ export const BusinessAnalyticsScreen = () => {
           <Text style={styles.screenTitle}>Analytics</Text>
           
           <View style={styles.metricsGrid}>
-            {renderMetricCard('Total Revenue', '$2,450', '+15% vs last month', true)}
-            {renderMetricCard('Bookings', '45', '-5% vs last month', false)}
-            {renderMetricCard('New Clients', '12', '+8% vs last month', true)}
-            {renderMetricCard('Avg. Rating', '4.8', '+0.2 vs last month', true)}
+            {renderMetricCard('Total Revenue', '£0', '+0% vs last month', true)}
+            {renderMetricCard('Bookings', '0', '+0% vs last month', true)}
+            {renderMetricCard('New Clients', '0', '+0% vs last month', true)}
+            {renderMetricCard('Avg. Rating', '0', '+0% vs last month', true)}
           </View>
 
           <View style={styles.section}>
@@ -76,7 +75,6 @@ export const BusinessAnalyticsScreen = () => {
           </View>
         </View>
       </ScrollView>
-      <BusinessNavigationBar />
     </SafeAreaView>
   );
 };

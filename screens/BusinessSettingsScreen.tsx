@@ -6,22 +6,33 @@ import {
   TouchableOpacity,
   Alert,
   SafeAreaView,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BusinessTopBar } from '../components/BusinessTopBar';
-import { BusinessNavigationBar } from '../components/BusinessNavigationBar';
 import { useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { RootStackParamList, TabParamList } from '../types/navigation';
 import { Typography } from '../components/Typography';
+import { useAuth } from '../contexts/AuthContext';
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type NavigationProp = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList, 'BusinessSettings'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 
 export const BusinessSettingsScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const { signOut } = useAuth();
 
-  const handleLogout = () => {
+  const navigateToScreen = (screenName: keyof RootStackParamList) => {
+    navigation.navigate(screenName);
+  };
+
+  const handleLogout = async () => {
     Alert.alert(
       'Logout',
       'Are you sure you want to log out?',
@@ -33,9 +44,17 @@ export const BusinessSettingsScreen = () => {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: () => {
-            // TODO: Implement logout functionality
-            navigation.navigate('Welcome');
+          onPress: async () => {
+            try {
+              await signOut();
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Auth' }],
+              });
+            } catch (error) {
+              console.error('[BusinessSettingsScreen] Sign out error:', error);
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
           },
         },
       ],
@@ -58,59 +77,11 @@ export const BusinessSettingsScreen = () => {
       <BusinessTopBar />
       <ScrollView style={styles.container}>
         <View style={styles.section}>
-          <Typography variant="h2" style={styles.sectionTitle}>Business Profile</Typography>
-          <SettingsItem
-            icon="store"
-            title="Business Profile"
-            onPress={() => navigation.navigate('BusinessProfile')}
-          />
-          <SettingsItem
-            icon="clock"
-            title="Business Hours"
-            onPress={() => navigation.navigate('BusinessHours')}
-          />
-          <SettingsItem
-            icon="tag-multiple"
-            title="Services & Pricing"
-            onPress={() => navigation.navigate('ServicesPricing')}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Typography variant="h2" style={styles.sectionTitle}>Booking Settings</Typography>
-          <SettingsItem
-            icon="calendar"
-            title="Appointment Types"
-            onPress={() => navigation.navigate('AppointmentTypes')}
-          />
-          <SettingsItem
-            icon="book"
-            title="Booking Rules"
-            onPress={() => navigation.navigate('BookingRules')}
-          />
-          <SettingsItem
-            icon="cancel"
-            title="Cancellation Policy"
-            onPress={() => navigation.navigate('CancellationPolicy')}
-          />
-        </View>
-
-        <View style={styles.section}>
           <Typography variant="h2" style={styles.sectionTitle}>Payments</Typography>
           <SettingsItem
             icon="credit-card"
             title="Payment Methods"
-            onPress={() => navigation.navigate('PaymentMethods')}
-          />
-          <SettingsItem
-            icon="cash"
-            title="Deposit Settings"
-            onPress={() => navigation.navigate('DepositSettings')}
-          />
-          <SettingsItem
-            icon="receipt"
-            title="VAT Settings"
-            onPress={() => navigation.navigate('VATSettings')}
+            onPress={() => navigateToScreen('PaymentMethodsScreen')}
           />
         </View>
 
@@ -119,17 +90,17 @@ export const BusinessSettingsScreen = () => {
           <SettingsItem
             icon="bell"
             title="Push Notifications"
-            onPress={() => navigation.navigate('PushNotifications')}
+            onPress={() => navigateToScreen('PushNotifications')}
           />
           <SettingsItem
             icon="email"
             title="Email Notifications"
-            onPress={() => navigation.navigate('EmailNotifications')}
+            onPress={() => navigateToScreen('EmailNotifications')}
           />
           <SettingsItem
             icon="message"
             title="SMS Notifications"
-            onPress={() => navigation.navigate('SMSNotifications')}
+            onPress={() => navigateToScreen('SMSNotifications')}
           />
         </View>
 
@@ -138,27 +109,27 @@ export const BusinessSettingsScreen = () => {
           <SettingsItem
             icon="account-cog"
             title="Account Settings"
-            onPress={() => navigation.navigate('AccountSettings')}
+            onPress={() => navigateToScreen('AccountSettings')}
           />
           <SettingsItem
             icon="shield-check"
             title="Privacy Policy"
-            onPress={() => navigation.navigate('PrivacyPolicy')}
+            onPress={() => navigateToScreen('PrivacyPolicy')}
           />
           <SettingsItem
             icon="file-document"
             title="Terms of Service"
-            onPress={() => navigation.navigate('TermsOfService')}
+            onPress={() => navigateToScreen('TermsOfService')}
           />
           <SettingsItem
             icon="help-circle"
             title="Help Centre"
-            onPress={() => navigation.navigate('HelpCentre')}
+            onPress={() => navigateToScreen('HelpCentre')}
           />
           <SettingsItem
             icon="headphones"
             title="Contact Support"
-            onPress={() => navigation.navigate('ContactSupport')}
+            onPress={() => navigateToScreen('ContactSupport')}
           />
         </View>
 
@@ -167,7 +138,6 @@ export const BusinessSettingsScreen = () => {
           <Typography variant="body1" style={styles.logoutText}>Log Out</Typography>
         </TouchableOpacity>
       </ScrollView>
-      <BusinessNavigationBar />
     </SafeAreaView>
   );
 };
@@ -179,6 +149,8 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 85 : 65,
   },
   section: {
     marginBottom: 24,

@@ -23,40 +23,18 @@ const WelcomeScreen = () => {
           </View>
 
           <View style={styles.buttonContainer}>
-            <Text style={styles.chooseText}>Choose your experience</Text>
-            
             <TouchableOpacity
               style={[styles.button, styles.primaryButton]}
-              onPress={() => navigation.navigate('CustomerHome')}
+              onPress={() => navigation.navigate('SignUp')}
             >
-              <Text style={styles.primaryButtonText}>Continue as Customer</Text>
+              <Text style={styles.primaryButtonText}>Create account</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.button, styles.secondaryButton]}
-              onPress={() => navigation.navigate('Home')}
-            >
-              <Text style={styles.secondaryButtonText}>Continue as Business</Text>
-            </TouchableOpacity>
-
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <TouchableOpacity
-              style={[styles.button, styles.outlineButton]}
-              onPress={() => navigation.navigate('SignUp')}
-            >
-              <Text style={styles.outlineButtonText}>Create account</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, styles.plainButton]}
               onPress={() => navigation.navigate('SignIn')}
             >
-              <Text style={styles.plainButtonText}>Sign in</Text>
+              <Text style={styles.secondaryButtonText}>Sign in</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -98,12 +76,6 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 40,
   },
-  chooseText: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
   button: {
     width: '100%',
     padding: 16,
@@ -128,45 +100,6 @@ const styles = StyleSheet.create({
     color: '#FF5722',
     fontSize: 16,
     fontWeight: '600',
-  },
-  outlineButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#666666',
-  },
-  outlineButtonText: {
-    color: '#666666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  plainButton: {
-    backgroundColor: 'transparent',
-  },
-  plainButtonText: {
-    color: '#666666',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 24,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#E0E0E0',
-  },
-  dividerText: {
-    color: '#666666',
-    marginHorizontal: 12,
-  },
-  disabledButton: {
-    backgroundColor: '#E0E0E0',
-    opacity: 0.7,
-  },
-  disabledButtonText: {
-    color: '#666666',
   },
 });
 

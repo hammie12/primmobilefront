@@ -1,222 +1,183 @@
-# Prim Mobile App
+# Supabase CLI (v1)
 
-A professional service booking and networking platform built with React Native and TypeScript.
+[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=main)](https://coveralls.io/github/supabase/cli?branch=main) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
+](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
 
-## 🌟 Features
+[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
 
-### For Service Professionals
-- Professional profile management
-- Service portfolio and gallery
-- Dynamic scheduling and availability
-- Booking management
-- Real-time analytics and insights
-- Marketing tools and promotions
-- Payment processing and financial tracking
-- Customer relationship management
+This repository contains all the functionality for Supabase CLI.
 
-### For Customers
-- Easy service discovery and booking
-- Professional search with filters
-- Secure payment processing
-- Loyalty rewards program
-- Booking management
-- Real-time notifications
-- Reviews and ratings
-- Address management
+- [x] Running Supabase locally
+- [x] Managing database migrations
+- [x] Creating and deploying Supabase Functions
+- [x] Generating types directly from your database schema
+- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
 
-## 🛠 Tech Stack
+## Getting started
 
-- **Framework:** React Native
-- **Language:** TypeScript
-- **State Management:** [To be implemented]
-- **Navigation:** React Navigation
-- **UI Components:** Custom components with Expo
-- **Icons:** MaterialCommunityIcons & Ionicons
-- **Styling:** React Native StyleSheet
+### Install the CLI
 
-## 📱 Screens
+Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
 
-### Authentication
-- Welcome Screen
-- Sign In Screen
-- Sign Up Screen
-
-### Professional Screens
-- Professional Profile
-- Service Management
-- Booking Management
-- Business Analytics
-- Settings & Configuration
-
-### Customer Screens
-- Home/Discovery
-- Search
-- Service Details
-- Booking Flow
-- Profile Management
-- Rewards Center
-
-### Shared Screens
-- Notifications
-- Help Center
-- Settings
-
-## 🏗 Project Structure
-
-```
-PrimMobile/
-├── components/           # Reusable UI components
-├── screens/             # Screen components
-│   ├── customer/        # Customer-specific screens
-│   ├── settings/        # Settings screens
-│   └── help/           # Help & support screens
-├── types/              # TypeScript type definitions
-│   └── schema.ts       # Database schema types
-├── styles/             # Global styles
-└── assets/             # Images, fonts, etc.
+```bash
+npm i supabase --save-dev
 ```
 
-## 💾 Data Models
+To install the beta release channel:
 
-The app uses a comprehensive TypeScript schema (`types/schema.ts`) that includes:
-
-- User Management
-- Service Management
-- Booking System
-- Payment Processing
-- Rewards Program
-- Analytics System
-- Notification System
-- Help & Support
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Node.js (v14 or later)
-- npm or yarn
-- React Native development environment
-- iOS Simulator (Mac only) or Android Emulator
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone [repository-url]
-   cd PrimMobile
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   # or
-   yarn install
-   ```
-
-3. Start the development server:
-   ```bash
-   npm start
-   # or
-   yarn start
-   ```
-
-4. Run on iOS (Mac only):
-   ```bash
-   npm run ios
-   # or
-   yarn ios
-   ```
-
-5. Run on Android:
-   ```bash
-   npm run android
-   # or
-   yarn android
-   ```
-
-## 📱 Development
-
-### Code Style
-
-- Follow TypeScript best practices
-- Use functional components with hooks
-- Implement proper type safety
-- Follow the established component structure
-
-### Component Structure
-
-```typescript
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
-
-interface ComponentProps {
-  // Props definition
-}
-
-export const Component: React.FC<ComponentProps> = ({ ...props }) => {
-  return (
-    <View style={styles.container}>
-      {/* Component content */}
-    </View>
-  );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    // Styles
-  },
-});
+```bash
+npm i supabase@beta --save-dev
 ```
 
-## 🔒 Security
+When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
 
-- Implement proper authentication
-- Secure data transmission
-- Handle sensitive data appropriately
-- Follow security best practices
+```
+NODE_OPTIONS=--no-experimental-fetch yarn add supabase
+```
 
-## 🔄 State Management
+> **Note**
+For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
 
-[To be implemented]
-- Global state management
-- Local state handling
-- Data persistence
-- Cache management
+<details>
+  <summary><b>macOS</b></summary>
 
-## 📈 Analytics & Monitoring
+  Available via [Homebrew](https://brew.sh). To install:
 
-[To be implemented]
-- User analytics
-- Performance monitoring
-- Error tracking
-- Usage metrics
+  ```sh
+  brew install supabase/tap/supabase
+  ```
 
-## 🌐 API Integration
+  To install the beta release channel:
+  
+  ```sh
+  brew install supabase/tap/supabase-beta
+  brew link --overwrite supabase-beta
+  ```
+  
+  To upgrade:
 
-[To be implemented]
-- RESTful API endpoints
-- Real-time updates
-- Data synchronization
-- Error handling
+  ```sh
+  brew upgrade supabase
+  ```
+</details>
 
-## 📱 Platform Support
+<details>
+  <summary><b>Windows</b></summary>
 
-- iOS 13.0+
-- Android API level 21+
-- Tablet support (planned)
+  Available via [Scoop](https://scoop.sh). To install:
 
-## 🤝 Contributing
+  ```powershell
+  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+  scoop install supabase
+  ```
 
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+  To upgrade:
 
-## 📄 License
+  ```powershell
+  scoop update supabase
+  ```
+</details>
 
-[License details to be added]
+<details>
+  <summary><b>Linux</b></summary>
 
-## 📞 Support
+  Available via [Homebrew](https://brew.sh) and Linux packages.
 
-[Support contact details to be added]
+  #### via Homebrew
+
+  To install:
+
+  ```sh
+  brew install supabase/tap/supabase
+  ```
+
+  To upgrade:
+
+  ```sh
+  brew upgrade supabase
+  ```
+
+  #### via Linux packages
+
+  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
+
+  ```sh
+  sudo apk add --allow-untrusted <...>.apk
+  ```
+
+  ```sh
+  sudo dpkg -i <...>.deb
+  ```
+
+  ```sh
+  sudo rpm -i <...>.rpm
+  ```
+
+  ```sh
+  sudo pacman -U <...>.pkg.tar.zst
+  ```
+</details>
+
+<details>
+  <summary><b>Other Platforms</b></summary>
+
+  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
+
+  ```sh
+  go install github.com/supabase/cli@latest
+  ```
+
+  Add a symlink to the binary in `$PATH` for easier access:
+
+  ```sh
+  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
+  ```
+
+  This works on other non-standard Linux distros.
+</details>
+
+<details>
+  <summary><b>Community Maintained Packages</b></summary>
+
+  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
+  To install in your working directory:
+
+  ```bash
+  pkgx install supabase
+  ```
+
+  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
+</details>
+
+### Run the CLI
+
+```bash
+supabase bootstrap
+```
+
+Or using npx:
+
+```bash
+npx supabase bootstrap
+```
+
+The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
+
+## Docs
+
+Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
+
+## Breaking changes
+
+We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
+
+However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
+
+## Developing
+
+To run from source:
+
+```sh
+# Go >= 1.22
+go run . help
+```

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,14 @@ import {
   SafeAreaView,
   ScrollView,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Calendar, CalendarList, Agenda } from 'react-native-calendars';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { format } from 'date-fns';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import { useNavigation } from '@react-navigation/native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -24,40 +28,220 @@ interface TimeSlot {
 
 interface Appointment {
   id: string;
-  date: string;
-  time: string;
-  clientName: string;
-  service: string;
-  duration: number;
+  start_time: string;
+  end_time: string;
+  customer_profiles: {
+    first_name: string;
+    last_name: string;
+  };
+  service: {
+    name: string;
+    duration: number;
+  };
+  status: string;
 }
 
 export const BookingScreen = () => {
+  const navigation = useNavigation();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: '1',
-      date: '2024-01-20',
-      time: '10:00',
-      clientName: 'John Doe',
-      service: 'Haircut',
-      duration: 60,
-    },
-    {
-      id: '2',
-      date: '2024-01-20',
-      time: '14:30',
-      clientName: 'Jane Smith',
-      service: 'Color Treatment',
-      duration: 120,
-    },
-  ]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const { user } = useAuth();
 
-  const timeSlots: TimeSlot[] = Array.from({ length: 24 }, (_, i) => ({
-    id: i.toString(),
-    time: `${i.toString().padStart(2, '0')}:00`,
-    isAvailable: true,
-  }));
+  useEffect(() => {
+    fetchBookings();
+  }, [selectedDate]);
+
+  const fetchBookings = async () => {
+    try {
+      // First get the professional's data
+      const { data: profData, error: profError } = await supabase
+        .from('professionals')
+        .select('id')
+        .eq('user_id', user?.id)
+        .single();
+
+      if (profError) {
+        console.error('Error getting professional:', profError);
+        return;
+      }
+
+      if (!profData?.id) {
+        console.error('No professional found');
+        return;
+      }
+
+      const professionalId = profData.id;
+      console.log('Professional ID:', professionalId);
+
+      // Get the start and end of the week
+      const startOfWeek = new Date(selectedDate);
+      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(endOfWeek.getDate() + 7);
+      endOfWeek.setHours(23, 59, 59, 999);
+
+      console.log('Fetching bookings for date range:', {
+        start: startOfWeek.toISOString(),
+        end: endOfWeek.toISOString(),
+        professionalId
+      });
+
+      // Fetch existing bookings
+      const { data: bookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          start_time,
+          end_time,
+          status,
+          professional_id,
+          customer_profiles (
+            id,
+            first_name,
+            last_name,
+            phone_number,
+            user_id
+          ),
+          services:service_id (
+            id,
+            name,
+            duration,
+            price,
+            professional_id
+          )
+        `)
+        .eq('professional_id', professionalId)
+        .gte('start_time', startOfWeek.toISOString())
+        .lte('start_time', endOfWeek.toISOString())
+        .neq('status', 'CANCELLED')
+        .order('start_time', { ascending: true });
+
+      if (bookingsError) {
+        console.error('Error fetching bookings:', bookingsError);
+        return;
+      }
+
+      console.log('Found bookings:', bookings);
+
+      // Filter out any null or invalid bookings
+      const validBookings = bookings?.filter(booking => 
+        booking && 
+        booking.start_time && 
+        booking.end_time && 
+        booking.customer_profiles &&
+        booking.service &&
+        booking.professional_id === professionalId
+      ) || [];
+
+      setAppointments(validBookings);
+
+      console.log('Valid bookings for professional:', {
+        professionalId,
+        bookingsCount: validBookings.length,
+        bookings: validBookings.map(b => ({
+          id: b.id,
+          start: format(new Date(b.start_time), 'yyyy-MM-dd HH:mm'),
+          end: format(new Date(b.end_time), 'yyyy-MM-dd HH:mm'),
+          customer: `${b.customer_profiles.first_name} ${b.customer_profiles.last_name}`,
+          service: b.service.name
+        }))
+      });
+
+    } catch (error) {
+      console.error('Error in fetchBookings:', error);
+    }
+  };
+
+  const isTimeSlotAvailable = (date: Date, slotTime: string) => {
+    const [hours, minutes = '00'] = slotTime.split(':').map(Number);
+    const slotDate = new Date(date);
+    slotDate.setHours(hours, minutes, 0, 0);
+    const slotEndTime = new Date(slotDate);
+    slotEndTime.setMinutes(slotEndTime.getMinutes() + 30); // 30-minute slots
+
+    // Check if any appointment overlaps with this time slot
+    const isUnavailable = appointments.some(apt => {
+      const startTime = new Date(apt.start_time);
+      const endTime = new Date(apt.end_time);
+      
+      // Only check appointments for the same day
+      if (format(startTime, 'yyyy-MM-dd') !== format(date, 'yyyy-MM-dd')) {
+        return false;
+      }
+
+      // Using the same logic as our SQL function:
+      // 1. The existing booking starts before or at our slot start AND ends after our slot start
+      // 2. The existing booking starts before our slot end AND ends at or after our slot end
+      // 3. The existing booking is completely contained within our slot
+      const hasConflict = (
+        (startTime <= slotDate && endTime > slotDate) ||
+        (startTime < slotEndTime && endTime >= slotEndTime) ||
+        (startTime >= slotDate && endTime <= slotEndTime)
+      );
+
+      if (hasConflict) {
+        console.log('Booking conflict detected:', {
+          slot: {
+            start: format(slotDate, 'HH:mm'),
+            end: format(slotEndTime, 'HH:mm')
+          },
+          existingBooking: {
+            start: format(startTime, 'HH:mm'),
+            end: format(endTime, 'HH:mm'),
+            customer: `${apt.customer_profiles.first_name} ${apt.customer_profiles.last_name}`,
+            service: apt.service.name
+          }
+        });
+      }
+
+      return hasConflict;
+    });
+
+    return !isUnavailable;
+  };
+
+  const getTimeSlots = (date: Date) => {
+    // Create time slots from business hours (e.g., 9 AM to 5 PM)
+    const slots: TimeSlot[] = [];
+    const startHour = 9; // 9 AM
+    const endHour = 17; // 5 PM
+
+    for (let hour = startHour; hour < endHour; hour++) {
+      // Create two 30-minute slots for each hour
+      ['00', '30'].forEach((minutes, index) => {
+        const time = `${hour.toString().padStart(2, '0')}:${minutes}`;
+        const available = isTimeSlotAvailable(date, time);
+        slots.push({
+          id: `${hour}-${index}`,
+          time,
+          isAvailable: available
+        });
+      });
+    }
+
+    return slots;
+  };
+
+  const handleSlotPress = (date: Date, time: string, isAvailable: boolean) => {
+    // Double-check availability at the time of press
+    if (!isTimeSlotAvailable(date, time)) {
+      Alert.alert('Not Available', 'This time slot is already booked.');
+      return;
+    }
+
+    const [hours, minutes] = time.split(':').map(Number);
+    const selectedDateTime = new Date(date);
+    selectedDateTime.setHours(hours, minutes, 0, 0);
+
+    // Navigate to booking confirmation with the selected time
+    navigation.navigate('BookingConfirmation', {
+      selectedTime: selectedDateTime.toISOString(),
+      duration: 30 // Default duration in minutes
+    });
+  };
 
   const renderViewModeSelector = () => (
     <View style={styles.viewModeContainer}>
@@ -65,34 +249,32 @@ export const BookingScreen = () => {
         style={[styles.viewModeButton, viewMode === 'day' && styles.viewModeButtonActive]}
         onPress={() => setViewMode('day')}
       >
-        <Text style={[styles.viewModeText, viewMode === 'day' && styles.viewModeTextActive]}>
-          Day
-        </Text>
+        <Text style={[styles.viewModeText, viewMode === 'day' && styles.viewModeTextActive]}>Day</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.viewModeButton, viewMode === 'week' && styles.viewModeButtonActive]}
         onPress={() => setViewMode('week')}
       >
-        <Text style={[styles.viewModeText, viewMode === 'week' && styles.viewModeTextActive]}>
-          Week
-        </Text>
+        <Text style={[styles.viewModeText, viewMode === 'week' && styles.viewModeTextActive]}>Week</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[styles.viewModeButton, viewMode === 'month' && styles.viewModeButtonActive]}
         onPress={() => setViewMode('month')}
       >
-        <Text style={[styles.viewModeText, viewMode === 'month' && styles.viewModeTextActive]}>
-          Month
-        </Text>
+        <Text style={[styles.viewModeText, viewMode === 'month' && styles.viewModeTextActive]}>Month</Text>
       </TouchableOpacity>
     </View>
   );
 
   const renderDayView = () => (
     <ScrollView style={styles.dayViewContainer}>
-      {timeSlots.map((slot) => {
+      {getTimeSlots(selectedDate).map((slot) => {
         const appointment = appointments.find(
-          (apt) => apt.date === format(selectedDate, 'yyyy-MM-dd') && apt.time === slot.time
+          (apt) => {
+            const aptDate = new Date(apt.start_time);
+            return format(aptDate, 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd') &&
+                   format(aptDate, 'HH:mm') === slot.time;
+          }
         );
 
         return (
@@ -101,13 +283,27 @@ export const BookingScreen = () => {
             <View style={styles.appointmentContainer}>
               {appointment ? (
                 <View style={styles.appointmentCard}>
-                  <Text style={styles.appointmentClientName}>{appointment.clientName}</Text>
-                  <Text style={styles.appointmentService}>{appointment.service}</Text>
-                  <Text style={styles.appointmentDuration}>{appointment.duration} min</Text>
+                  <Text style={styles.appointmentClientName}>
+                    {`${appointment.customer_profiles.first_name} ${appointment.customer_profiles.last_name}`}
+                  </Text>
+                  <Text style={styles.appointmentService}>{appointment.service.name}</Text>
+                  <Text style={styles.appointmentDuration}>{appointment.service.duration} min</Text>
                 </View>
               ) : (
-                <TouchableOpacity style={styles.availableSlot}>
-                  <Text style={styles.availableSlotText}>Available</Text>
+                <TouchableOpacity 
+                  style={[
+                    styles.availableSlot,
+                    !slot.isAvailable && styles.unavailableSlot
+                  ]}
+                  disabled={!slot.isAvailable}
+                  onPress={() => handleSlotPress(selectedDate, slot.time, slot.isAvailable)}
+                >
+                  <Text style={[
+                    styles.availableSlotText,
+                    !slot.isAvailable && styles.unavailableSlotText
+                  ]}>
+                    {slot.isAvailable ? 'Available' : 'Booked'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -128,7 +324,7 @@ export const BookingScreen = () => {
         style={styles.calendar}
       />
       <ScrollView style={styles.weekSchedule}>
-        {timeSlots.map((slot) => (
+        {getTimeSlots(selectedDate).map((slot) => (
           <View key={slot.id} style={styles.weekTimeSlot}>
             <Text style={styles.timeText}>{slot.time}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -136,18 +332,37 @@ export const BookingScreen = () => {
                 const date = new Date(selectedDate);
                 date.setDate(date.getDate() - date.getDay() + index);
                 const appointment = appointments.find(
-                  (apt) => apt.date === format(date, 'yyyy-MM-dd') && apt.time === slot.time
+                  (apt) => {
+                    const aptDate = new Date(apt.start_time);
+                    return format(aptDate, 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd') &&
+                           format(aptDate, 'HH:mm') === slot.time;
+                  }
                 );
+                const isAvailable = isTimeSlotAvailable(date, slot.time);
 
                 return (
                   <View key={index} style={styles.weekDaySlot}>
                     {appointment ? (
                       <View style={styles.weekAppointmentCard}>
-                        <Text style={styles.weekAppointmentText}>{appointment.clientName}</Text>
+                        <Text style={styles.weekAppointmentText}>
+                          {`${appointment.customer_profiles.first_name} ${appointment.customer_profiles.last_name}`}
+                        </Text>
                       </View>
                     ) : (
-                      <TouchableOpacity style={styles.weekAvailableSlot}>
-                        <Text style={styles.weekAvailableText}>+</Text>
+                      <TouchableOpacity 
+                        style={[
+                          styles.weekAvailableSlot,
+                          !isAvailable && styles.weekUnavailableSlot
+                        ]}
+                        disabled={!isAvailable}
+                        onPress={() => handleSlotPress(date, slot.time, isAvailable)}
+                      >
+                        <Text style={[
+                          styles.weekAvailableText,
+                          !isAvailable && styles.weekUnavailableText
+                        ]}>
+                          {isAvailable ? '+' : '×'}
+                        </Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -180,15 +395,17 @@ export const BookingScreen = () => {
         </Text>
         <ScrollView>
           {appointments
-            .filter((apt) => apt.date === format(selectedDate, 'yyyy-MM-dd'))
+            .filter((apt) => format(new Date(apt.start_time), 'yyyy-MM-dd') === format(selectedDate, 'yyyy-MM-dd'))
             .map((appointment) => (
               <View key={appointment.id} style={styles.monthAppointmentCard}>
-                <Text style={styles.monthAppointmentTime}>{appointment.time}</Text>
+                <Text style={styles.monthAppointmentTime}>{format(new Date(appointment.start_time), 'HH:mm')}</Text>
                 <View style={styles.monthAppointmentDetails}>
-                  <Text style={styles.monthAppointmentClient}>{appointment.clientName}</Text>
-                  <Text style={styles.monthAppointmentService}>{appointment.service}</Text>
+                  <Text style={styles.monthAppointmentClient}>
+                    {`${appointment.customer_profiles.first_name} ${appointment.customer_profiles.last_name}`}
+                  </Text>
+                  <Text style={styles.monthAppointmentService}>{appointment.service.name}</Text>
                 </View>
-                <Text style={styles.monthAppointmentDuration}>{appointment.duration} min</Text>
+                <Text style={styles.monthAppointmentDuration}>{appointment.service.duration} min</Text>
               </View>
             ))}
         </ScrollView>
@@ -377,5 +594,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 4,
+  },
+  unavailableSlot: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E0E0E0',
+    opacity: 0.6,
+    pointerEvents: 'none',
+  },
+  unavailableSlotText: {
+    color: '#999999',
+  },
+  weekUnavailableSlot: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E0E0E0',
+    opacity: 0.6,
+    pointerEvents: 'none',
+  },
+  weekUnavailableText: {
+    color: '#999999',
   },
 });

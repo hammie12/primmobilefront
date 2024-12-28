@@ -1,106 +1,84 @@
-import React, { useState } from 'react';
-import { View, Switch } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React from 'react';
+import { View, StyleSheet, Switch } from 'react-native';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
-import { SettingsSection, SettingsRow } from '../../components/SettingsComponents';
+import { Typography } from '../../components/Typography';
 
 export const PushNotificationsScreen = () => {
-  const navigation = useNavigation();
-  const [settings, setSettings] = useState({
-    newBookings: true,
-    bookingChanges: true,
-    bookingReminders: true,
-    cancellations: true,
-    payments: true,
-    reviews: true,
-    promotions: false,
+  const [notifications, setNotifications] = React.useState({
+    bookings: true,
+    reminders: true,
+    marketing: false,
   });
 
-  const handleSave = () => {
-    // TODO: Implement save functionality
-    navigation.goBack();
-  };
-
-  const toggleSetting = (key: keyof typeof settings) => {
-    setSettings(prev => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
-
   return (
-    <BaseSettingsScreen
-      title="Push Notifications"
-      onSave={handleSave}
-    >
-      <SettingsSection title="Booking Notifications">
-        <SettingsRow
-          label="New Bookings"
-          value={
-            <Switch
-              value={settings.newBookings}
-              onValueChange={() => toggleSetting('newBookings')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Booking Changes"
-          value={
-            <Switch
-              value={settings.bookingChanges}
-              onValueChange={() => toggleSetting('bookingChanges')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Booking Reminders"
-          value={
-            <Switch
-              value={settings.bookingReminders}
-              onValueChange={() => toggleSetting('bookingReminders')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Cancellations"
-          value={
-            <Switch
-              value={settings.cancellations}
-              onValueChange={() => toggleSetting('cancellations')}
-            />
-          }
-        />
-      </SettingsSection>
+    <BaseSettingsScreen title="Push Notifications">
+      <View style={styles.container}>
+        <View style={styles.settingItem}>
+          <View style={styles.settingText}>
+            <Typography variant="body1" style={styles.settingTitle}>Booking Updates</Typography>
+            <Typography variant="body2" style={styles.settingDescription}>
+              Notifications about new, modified, or cancelled bookings
+            </Typography>
+          </View>
+          <Switch
+            value={notifications.bookings}
+            onValueChange={(value) => setNotifications(prev => ({ ...prev, bookings: value }))}
+          />
+        </View>
 
-      <SettingsSection title="Other Notifications">
-        <SettingsRow
-          label="Payment Updates"
-          value={
-            <Switch
-              value={settings.payments}
-              onValueChange={() => toggleSetting('payments')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Reviews & Feedback"
-          value={
-            <Switch
-              value={settings.reviews}
-              onValueChange={() => toggleSetting('reviews')}
-            />
-          }
-        />
-        <SettingsRow
-          label="Promotions & Updates"
-          value={
-            <Switch
-              value={settings.promotions}
-              onValueChange={() => toggleSetting('promotions')}
-            />
-          }
-        />
-      </SettingsSection>
+        <View style={styles.settingItem}>
+          <View style={styles.settingText}>
+            <Typography variant="body1" style={styles.settingTitle}>Reminders</Typography>
+            <Typography variant="body2" style={styles.settingDescription}>
+              Upcoming appointment reminders
+            </Typography>
+          </View>
+          <Switch
+            value={notifications.reminders}
+            onValueChange={(value) => setNotifications(prev => ({ ...prev, reminders: value }))}
+          />
+        </View>
+
+        <View style={styles.settingItem}>
+          <View style={styles.settingText}>
+            <Typography variant="body1" style={styles.settingTitle}>Marketing</Typography>
+            <Typography variant="body2" style={styles.settingDescription}>
+              News and promotional messages
+            </Typography>
+          </View>
+          <Switch
+            value={notifications.marketing}
+            onValueChange={(value) => setNotifications(prev => ({ ...prev, marketing: value }))}
+          />
+        </View>
+      </View>
     </BaseSettingsScreen>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    padding: 16,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  settingText: {
+    flex: 1,
+    marginRight: 16,
+  },
+  settingTitle: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+});

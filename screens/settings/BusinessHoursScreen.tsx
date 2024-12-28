@@ -1,49 +1,148 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   Switch,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Platform,
+  Modal,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
-import { StackNavigationProp } from '@react-navigation/stack';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { supabase } from '../../supabase/client';
+import { useAuth } from '../../contexts/AuthContext';
+import { useNavigation } from '@react-navigation/native';
 
-interface TimeSlot {
-  open: string;
-  close: string;
-}
-
-interface DaySchedule {
+type DaySchedule = {
   isOpen: boolean;
-  hours: TimeSlot;
-}
+  openTime: string;
+  closeTime: string;
+};
 
-interface BusinessHoursScreenProps {
-  navigation: StackNavigationProp<any>;
-}
+type WeekSchedule = {
+  [key: string]: DaySchedule;
+};
 
-export const BusinessHoursScreen: React.FC<BusinessHoursScreenProps> = ({ navigation }) => {
-  const [schedule, setSchedule] = useState({
-    monday: { isOpen: true, hours: { open: '09:00', close: '17:00' } },
-    tuesday: { isOpen: true, hours: { open: '09:00', close: '17:00' } },
-    wednesday: { isOpen: true, hours: { open: '09:00', close: '17:00' } },
-    thursday: { isOpen: true, hours: { open: '09:00', close: '17:00' } },
-    friday: { isOpen: true, hours: { open: '09:00', close: '17:00' } },
-    saturday: { isOpen: false, hours: { open: '10:00', close: '15:00' } },
-    sunday: { isOpen: false, hours: { open: '10:00', close: '15:00' } },
+const DAYS_OF_WEEK = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday'
+];
+
+export const BusinessHoursScreen = () => {
+  const { user } = useAuth();
+  const navigation = useNavigation();
+  const [isLoading, setIsLoading] = useState(false);
+  const [schedule, setSchedule] = useState<WeekSchedule>({
+    Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Saturday: { isOpen: false, openTime: '10:00', closeTime: '16:00' },
+    Sunday: { isOpen: false, openTime: '10:00', closeTime: '16:00' },
   });
 
-  const [specialHours, setSpecialHours] = useState([
-    {
-      date: '2024-01-01',
-      name: 'New Year\'s Day',
-      isOpen: false,
-      hours: { open: '00:00', close: '00:00' },
-    },
-  ]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [selectedTimeType, setSelectedTimeType] = useState<'openTime' | 'closeTime'>('openTime');
+  const [tempTime, setTempTime] = useState(new Date());
+
+  useEffect(() => {
+    if (user) {
+      fetchBusinessHours();
+    }
+  }, [user]);
+
+  const fetchBusinessHours = async () => {
+    try {
+      const { data: business, error } = await supabase
+        .from('businesses')
+        .select('business_hours')
+        .eq('owner_id', user?.id)
+        .single();
+
+      if (error) throw error;
+
+      if (business?.business_hours) {
+        setSchedule(business.business_hours);
+      }
+    } catch (error) {
+      console.error('Error fetching business hours:', error);
+      if (error.message !== 'Network request failed') {
+        Alert.alert('Error', 'Failed to load business hours');
+      }
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user) {
+      Alert.alert('Error', 'You must be logged in to save changes');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      // Validate times
+      for (const day of DAYS_OF_WEEK) {
+        const { openTime, closeTime, isOpen } = schedule[day];
+        if (isOpen) {
+          const openMinutes = timeToMinutes(openTime);
+          const closeMinutes = timeToMinutes(closeTime);
+          
+          if (closeMinutes <= openMinutes) {
+            throw new Error(`Invalid hours for ${day}: Closing time must be after opening time`);
+          }
+        }
+      }
+
+      // First, get the business ID for the professional
+      const { data: business, error: businessError } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('owner_id', user.id)
+        .single();
+
+      if (businessError) {
+        console.error('Error fetching business:', businessError);
+        throw new Error('Failed to fetch business details');
+      }
+
+      if (!business) {
+        throw new Error('No business found for this user');
+      }
+
+      // Update the business hours in the businesses table
+      const { error: updateError } = await supabase
+        .from('businesses')
+        .update({ business_hours: schedule })
+        .eq('id', business.id);
+
+      if (updateError) throw updateError;
+
+      Alert.alert('Success', 'Business hours saved successfully');
+      navigation.goBack();
+    } catch (error: any) {
+      console.error('Error saving business hours:', error);
+      Alert.alert('Error', error.message || 'Failed to save business hours');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const timeToMinutes = (time: string): number => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
 
   const toggleDay = (day: string) => {
     setSchedule(prev => ({
@@ -55,82 +154,165 @@ export const BusinessHoursScreen: React.FC<BusinessHoursScreenProps> = ({ naviga
     }));
   };
 
-  const DayScheduleItem: React.FC<{
-    day: string;
-    dayName: string;
-    schedule: DaySchedule;
-  }> = ({ day, dayName, schedule }) => (
-    <View style={styles.dayItem}>
-      <View style={styles.dayHeader}>
-        <Text style={styles.dayName}>{dayName}</Text>
-        <Switch
-          trackColor={{ false: '#e0e0e0', true: 'rgba(255, 87, 34, 0.4)' }}
-          thumbColor={schedule.isOpen ? '#FF5722' : '#f4f3f4'}
-          ios_backgroundColor="#e0e0e0"
-          onValueChange={() => toggleDay(day)}
-          value={schedule.isOpen}
-        />
-      </View>
-      {schedule.isOpen && (
-        <TouchableOpacity style={styles.hoursContainer}>
-          <Text style={styles.hoursText}>
-            {schedule.hours.open} - {schedule.hours.close}
-          </Text>
-          <Ionicons name="chevron-forward" size={20} color="#FF5722" />
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+  const showTimePicker = (day: string, timeType: 'openTime' | 'closeTime') => {
+    const currentTime = schedule[day][timeType];
+    const [hours, minutes] = currentTime.split(':').map(Number);
+    
+    const date = new Date();
+    date.setHours(hours);
+    date.setMinutes(minutes);
+    
+    setTempTime(date);
+    setSelectedDay(day);
+    setSelectedTimeType(timeType);
+    setShowPicker(true);
+  };
 
-  const handleSave = () => {
-    // TODO: Implement save functionality
-    navigation.goBack();
+  const handleTimeChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowPicker(false);
+    }
+    
+    if (event.type === 'set' && date && selectedDay) {
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      const timeString = `${hours}:${minutes}`;
+
+      setSchedule(prev => ({
+        ...prev,
+        [selectedDay]: {
+          ...prev[selectedDay],
+          [selectedTimeType]: timeString,
+        },
+      }));
+      
+      if (Platform.OS === 'ios') {
+        setTempTime(date);
+      }
+    } else if (Platform.OS === 'android') {
+      setShowPicker(false);
+    }
+  };
+
+  const renderTimePicker = () => {
+    if (!showPicker) return null;
+
+    if (Platform.OS === 'ios') {
+      return (
+        <Modal
+          transparent
+          visible={showPicker}
+          animationType="slide"
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.pickerHeader}>
+                <TouchableOpacity onPress={() => setShowPicker(false)}>
+                  <Text style={styles.cancelButton}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    handleTimeChange({ type: 'set' }, tempTime);
+                    setShowPicker(false);
+                  }}
+                >
+                  <Text style={styles.doneButton}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                value={tempTime}
+                mode="time"
+                display="spinner"
+                onChange={(event, date) => {
+                  if (date) setTempTime(date);
+                }}
+                is24Hour={true}
+                textColor="#000000"
+                themeVariant="light"
+                style={styles.timePicker}
+              />
+            </View>
+          </View>
+        </Modal>
+      );
+    }
+
+    return (
+      <DateTimePicker
+        value={tempTime}
+        mode="time"
+        is24Hour={true}
+        display="default"
+        onChange={handleTimeChange}
+        textColor="#000000"
+        themeVariant="light"
+      />
+    );
   };
 
   return (
-    <BaseSettingsScreen title="Business Hours" onSave={handleSave}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Regular Hours</Text>
-          <View style={styles.card}>
-            <DayScheduleItem day="monday" dayName="Monday" schedule={schedule.monday} />
-            <DayScheduleItem day="tuesday" dayName="Tuesday" schedule={schedule.tuesday} />
-            <DayScheduleItem day="wednesday" dayName="Wednesday" schedule={schedule.wednesday} />
-            <DayScheduleItem day="thursday" dayName="Thursday" schedule={schedule.thursday} />
-            <DayScheduleItem day="friday" dayName="Friday" schedule={schedule.friday} />
-            <DayScheduleItem day="saturday" dayName="Saturday" schedule={schedule.saturday} />
-            <DayScheduleItem day="sunday" dayName="Sunday" schedule={schedule.sunday} />
-          </View>
+    <BaseSettingsScreen title="Business Hours">
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Business Hours</Text>
+          <TouchableOpacity 
+            style={[
+              styles.saveButton,
+              isLoading && styles.saveButtonDisabled
+            ]} 
+            onPress={handleSave}
+            disabled={isLoading}
+          >
+            <MaterialCommunityIcons name="content-save" size={24} color="#FFFFFF" />
+            <Text style={styles.saveButtonText}>
+              {isLoading ? 'Saving...' : 'Save'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Special Hours</Text>
-            <TouchableOpacity style={styles.addButton}>
-              <Ionicons name="add" size={24} color="#FF5722" />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.card}>
-            {specialHours.map((special, index) => (
-              <View key={index} style={styles.specialDay}>
-                <View style={styles.specialDayHeader}>
-                  <Text style={styles.specialDayName}>{special.name}</Text>
-                  <Text style={styles.specialDayDate}>{special.date}</Text>
-                </View>
-                <View style={styles.specialDayHours}>
-                  {special.isOpen ? (
-                    <Text style={styles.hoursText}>
-                      {special.hours.open} - {special.hours.close}
-                    </Text>
-                  ) : (
-                    <Text style={styles.closedText}>Closed</Text>
-                  )}
-                </View>
+        <ScrollView 
+          style={styles.scheduleContainer}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {DAYS_OF_WEEK.map((day) => (
+            <View key={day} style={styles.dayRow}>
+              <View style={styles.dayHeader}>
+                <Text style={styles.dayText}>{day}</Text>
+                <Switch
+                  value={schedule[day].isOpen}
+                  onValueChange={() => toggleDay(day)}
+                  trackColor={{ false: '#767577', true: '#FF5722' }}
+                  thumbColor={schedule[day].isOpen ? '#fff' : '#f4f3f4'}
+                  disabled={isLoading}
+                />
               </View>
-            ))}
-          </View>
-        </View>
-      </ScrollView>
+              <View style={styles.hoursContainer}>
+                <TouchableOpacity 
+                  style={styles.timeButton}
+                  onPress={() => showTimePicker(day, 'openTime')}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.timeButtonText}>
+                    Opens: {schedule[day].openTime}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.timeSeparator}>-</Text>
+                <TouchableOpacity 
+                  style={styles.timeButton}
+                  onPress={() => showTimePicker(day, 'closeTime')}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.timeButtonText}>
+                    Closes: {schedule[day].closeTime}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+
+        {renderTimePicker()}
+      </View>
     </BaseSettingsScreen>
   );
 };
@@ -138,89 +320,133 @@ export const BusinessHoursScreen: React.FC<BusinessHoursScreenProps> = ({ naviga
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
   },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333333',
   },
-  card: {
-    backgroundColor: '#FFF',
+  saveButton: {
+    backgroundColor: '#FF5722',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  dayItem: {
-    marginBottom: 16,
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  scheduleContainer: {
+    flex: 1,
+  },
+  dayRow: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  dayName: {
+  dayText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333',
+    color: '#333333',
   },
   hoursContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  timeButton: {
+    backgroundColor: '#F5F5F5',
+    padding: 12,
+    borderRadius: 6,
+    flex: 1,
+  },
+  timeButtonText: {
+    fontSize: 14,
+    color: '#333333',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  timeSeparator: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  hoursContainerClosed: {
+    opacity: 0.5,
+  },
+  timeButtonDisabled: {
+    backgroundColor: '#EEEEEE',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 6,
-  },
-  hoursText: {
-    fontSize: 15,
-    color: '#666',
-  },
-  addButton: {
-    padding: 8,
-  },
-  specialDay: {
-    marginBottom: 16,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: '#EEEEEE',
+  },
+  cancelButton: {
+    color: '#666666',
+    fontSize: 16,
+  },
+  doneButton: {
+    color: '#FF5722',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  timePicker: {
+    height: 200,
+    backgroundColor: '#FFFFFF',
+  },
+  scrollContent: {
     paddingBottom: 16,
   },
-  specialDayHeader: {
-    marginBottom: 8,
-  },
-  specialDayName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 4,
-  },
-  specialDayDate: {
-    fontSize: 14,
-    color: '#666',
-  },
-  specialDayHours: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 6,
-  },
-  closedText: {
-    fontSize: 15,
-    color: '#FF5722',
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
 });

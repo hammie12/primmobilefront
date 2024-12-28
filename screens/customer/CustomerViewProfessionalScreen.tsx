@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,118 +8,311 @@ import {
   ScrollView,
   Dimensions,
   Image,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { CustomerNavigationBar } from '../../components/CustomerNavigationBar';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import { supabase } from '../../lib/supabase';
+import { StackNavigationProp } from '@react-navigation/stack';
 
 const HEADER_HEIGHT = 150;
 const AVATAR_SIZE = 100;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const serviceColors = ['#4CAF50', '#2196F3', '#9C27B0', '#FF9800', '#F44336'];
+// Define the service categories enum to match your database
+const SERVICE_CATEGORIES = {
+  HAIR: 'HAIR',
+  NAILS: 'NAILS',
+  LASHES: 'LASHES'
+} as const;
+
+type ServiceCategory = typeof SERVICE_CATEGORIES[keyof typeof SERVICE_CATEGORIES];
+
+type Service = {
+  id: string;
+  professional_id: string;
+  name: string;
+  description: string;
+  duration: number;
+  price: number;
+  deposit_price: number;
+  category: ServiceCategory;
+  images?: string[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+// Define days of the week for business hours
+const DAYS_OF_WEEK = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday'
+];
+
+type RootStackParamList = {
+  Booking: {
+    professionalId: string;
+    serviceName: string;
+    servicePrice: number;
+    serviceDuration: string;
+    professionalName: string;
+    serviceId: string;
+  };
+  // ... other routes
+};
+
+type NavigationProp = StackNavigationProp<RootStackParamList, 'Booking'>;
 
 export const CustomerViewProfessionalScreen = ({ route }) => {
-  const navigation = useNavigation();
-  const { professionalId, name: routeName, rating, category, description } = route.params || {};
-  
-  const name = routeName || 'Sarah Johnson';
-  const title = `Professional ${category || 'Hair'} Stylist`;
-  const about = description || 
-    'Professional stylist with over 3 years of experience. Specialized in modern techniques and styling. Passionate about helping clients look and feel their best.';
-  
-  const services = [
-    {
-      id: '1',
-      name: 'Haircut & Styling',
-      price: '£50',
-      duration: '45 min',
-      color: serviceColors[0],
+  const navigation = useNavigation<NavigationProp>();
+  const { professionalId } = route.params;
+  console.log('CustomerViewProfessionalScreen received professionalId:', professionalId);
+  const [loading, setLoading] = useState(true);
+  const [profileData, setProfileData] = useState({
+    id: '',
+    userId: '',
+    bannerImage: null as string | null,
+    profileImage: null as string | null,
+    name: '',
+    title: '',
+    businessName: '',
+    category: '',
+    about: '',
+    address: {
+      postcode: '',
+      address_line_1: '',
+      address_line_2: '',
+      city: '',
+      county: '',
     },
-    {
-      id: '2',
-      name: 'Color Treatment',
-      price: '£120',
-      duration: '2 hours',
-      color: serviceColors[1],
-    },
-    {
-      id: '3',
-      name: 'Beard Trim',
-      price: '£25',
-      duration: '30 min',
-      color: serviceColors[2],
-    },
-  ];
+    phone: '',
+    email: '',
+    website: '',
+    rating: 0,
+    reviewCount: 0,
+    services: [] as Service[],
+    businessHours: {} as any,
+    reviews: [] as any[]
+  });
 
-  const reviews = [
-    {
-      id: '1',
-      user: 'John D.',
-      rating: 5,
-      comment: 'Amazing service! Best haircut I\'ve ever had.',
-      date: '2023-08-15',
-    },
-    {
-      id: '2',
-      user: 'Mary S.',
-      rating: 4,
-      comment: 'Very professional and friendly.',
-      date: '2023-08-10',
-    },
-  ];
+  useEffect(() => {
+    fetchProfileData();
+  }, [professionalId]);
 
-  const businessHours = [
-    { day: 'Monday', isOpen: true, start: '09:00', end: '17:00' },
-    { day: 'Tuesday', isOpen: true, start: '09:00', end: '17:00' },
-    { day: 'Wednesday', isOpen: true, start: '09:00', end: '17:00' },
-    { day: 'Thursday', isOpen: true, start: '09:00', end: '17:00' },
-    { day: 'Friday', isOpen: true, start: '09:00', end: '17:00' },
-    { day: 'Saturday', isOpen: false, start: '10:00', end: '15:00' },
-    { day: 'Sunday', isOpen: false, start: '10:00', end: '15:00' },
-  ];
+  const fetchProfileData = async () => {
+    try {
+      setLoading(true);
+      
+      console.log('Fetching data for professional ID:', professionalId);
+      
+      // Fetch professional profile
+      const { data: profile, error } = await supabase
+        .from('professionals')
+        .select('*, business_hours')
+        .eq('id', professionalId)
+        .single();
 
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .join('')
-      .toUpperCase();
+      if (error) {
+        console.error('Error fetching professional profile:', error);
+        throw error;
+      }
+
+      console.log('Fetched professional profile:', profile);
+
+      // Fetch services using the professional's ID from the professionals table
+      const { data: services, error: servicesError } = await supabase
+        .from('services')
+        .select(`
+          id,
+          professional_id,
+          name,
+          description,
+          duration,
+          price,
+          deposit_price,
+          category,
+          images,
+          created_at,
+          updated_at
+        `)
+        .eq('professional_id', professionalId)
+        .order('name', { ascending: true }); // Order by name to help identify duplicates
+
+      if (servicesError) {
+        console.error('Error fetching services:', servicesError);
+        throw servicesError;
+      }
+
+      console.log('Raw services from database:', services);
+
+      // Create a Map to store unique services by ID
+      const uniqueServices = new Map();
+      services?.forEach(service => {
+        if (!uniqueServices.has(service.id)) {
+          uniqueServices.set(service.id, {
+        id: service.id,
+        professional_id: service.professional_id,
+        name: service.name,
+        description: service.description || '',
+        duration: service.duration,
+        price: service.price,
+        deposit_price: service.deposit_price || service.price,
+        category: service.category as ServiceCategory,
+        images: service.images || [],
+        created_at: service.created_at,
+        updated_at: service.updated_at
+          });
+        } else {
+          console.warn('Duplicate service found:', {
+            id: service.id,
+            name: service.name,
+            category: service.category
+          });
+        }
+      });
+
+      // Convert Map to array
+      const transformedServices = Array.from(uniqueServices.values());
+      console.log('Transformed unique services:', transformedServices);
+
+      const profileDataToSet = {
+        id: profile?.id || '',
+        userId: profile?.user_id || '',
+        bannerImage: profile?.banner_image || null,
+        profileImage: profile?.profile_image || null,
+        name: profile?.name || '',
+        title: profile?.title || '',
+        businessName: profile?.business_name || '',
+        category: profile?.category || '',
+        about: profile?.about || '',
+        address: typeof profile?.address === 'string' ? JSON.parse(profile.address) : profile?.address || {
+          postcode: '',
+          address_line_1: '',
+          address_line_2: '',
+          city: '',
+          county: ''
+        },
+        phone: profile?.phone || '',
+        email: profile?.email || '',
+        website: profile?.website || '',
+        rating: profile?.rating || 0,
+        reviewCount: profile?.review_count || 0,
+        services: transformedServices,
+        businessHours: profile?.business_hours || {},
+        reviews: [] // We'll fetch reviews separately if needed
+      };
+
+      console.log('Setting profile data with unique services:', {
+        serviceCount: transformedServices.length,
+        services: transformedServices.map(s => ({
+          id: s.id,
+          name: s.name,
+          category: s.category
+        }))
+      });
+      
+      setProfileData(profileDataToSet);
+
+    } catch (error) {
+      console.error('Error in fetchProfileData:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderServiceCard = (service: any) => (
-    <TouchableOpacity 
-      key={service.id} 
-      style={styles.serviceCard}
-      onPress={() => navigation.navigate('ServiceDetails', {
-        professionalId,
-        serviceName: service.name,
-        servicePrice: service.price,
-        serviceDuration: service.duration,
-        professionalName: name,
-        category: category
-      })}
-    >
-      <View style={[styles.serviceImagePlaceholder, { backgroundColor: service.color }]}>
-        <Text style={styles.serviceInitials}>{getInitials(service.name)}</Text>
-      </View>
-      <View style={styles.serviceContent}>
-        <Text style={styles.serviceName}>{service.name}</Text>
-        <View style={styles.serviceDetails}>
-          <View style={styles.serviceDetail}>
-            <MaterialCommunityIcons name="cash" size={16} color="#666666" />
-            <Text style={styles.serviceDetailText}>{service.price}</Text>
-          </View>
-          <View style={styles.serviceDetail}>
-            <MaterialCommunityIcons name="clock-outline" size={16} color="#666666" />
-            <Text style={styles.serviceDetailText}>{service.duration}</Text>
+  const renderServiceCard = (service: Service) => {
+    console.log('Rendering service card with professionalId:', professionalId);
+    console.log('Rendering service:', service);
+    
+    // Validate required service fields
+    if (!service.id || !service.name || !service.duration || !service.price) {
+      console.error('Invalid service data:', service);
+      return null;
+    }
+
+    return (
+      <View key={service.id} style={styles.serviceCard}>
+        <View style={styles.serviceHeader}>
+          <View>
+            <Text style={styles.serviceName}>{service.name}</Text>
+            <Text style={styles.serviceCategory}>{service.category}</Text>
           </View>
         </View>
+
+        {service.images && service.images.length > 0 && (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            style={styles.serviceImagesContainer}
+          >
+            {service.images.map((image, index) => (
+              <Image 
+                key={index}
+                source={{ uri: image }} 
+                style={styles.serviceCardImage} 
+              />
+            ))}
+          </ScrollView>
+        )}
+
+        <Text style={styles.serviceDescription}>{service.description || 'No description available'}</Text>
+        <View style={styles.serviceDetails}>
+          <View style={styles.serviceDetail}>
+            <MaterialCommunityIcons name="clock-outline" size={16} color="#666666" />
+            <Text style={styles.serviceDetailText}>{service.duration} mins</Text>
+          </View>
+          <View style={styles.serviceDetail}>
+            <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
+            <Text style={styles.serviceDetailText}>Deposit: £{service.price}</Text>
+          </View>
+        </View>
+        <TouchableOpacity 
+          style={styles.bookServiceButton}
+          onPress={() => {
+            console.log('Service card navigating to Booking with professionalId:', professionalId);
+            navigation.navigate('Booking', {
+              professionalId,
+              serviceName: service.name,
+              servicePrice: service.price,
+              serviceDuration: service.duration.toString(),
+              professionalName: profileData.businessName,
+              serviceId: service.id
+            });
+          }}
+        >
+          <Text style={styles.bookServiceButtonText}>Book Now</Text>
+        </TouchableOpacity>
       </View>
-      <MaterialCommunityIcons name="chevron-right" size={24} color="#666666" />
-    </TouchableOpacity>
+    );
+  };
+
+  const renderBusinessHours = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Business Hours</Text>
+      </View>
+      {loading ? (
+        <Text style={styles.loadingText}>Loading business hours...</Text>
+      ) : (
+        DAYS_OF_WEEK.map((day) => {
+          const hours = profileData.businessHours[day];
+          return (
+            <View key={day} style={styles.hourRow}>
+              <Text style={styles.dayText}>{day}</Text>
+              <Text style={styles.hoursText}>
+                {hours?.isOpen ? `${hours.openTime} - ${hours.closeTime}` : 'Closed'}
+              </Text>
+            </View>
+          );
+        })
+      )}
+    </View>
   );
 
   const renderReviews = () => (
@@ -127,10 +320,10 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Reviews</Text>
       </View>
-      {reviews.map((review) => (
+      {profileData.reviews.map((review) => (
         <View key={review.id} style={styles.reviewCard}>
           <View style={styles.reviewHeader}>
-            <Text style={styles.reviewUser}>{review.user}</Text>
+            <Text style={styles.reviewUser}>{review.customer_name || 'Anonymous'}</Text>
             <View style={styles.ratingContainer}>
               {[...Array(5)].map((_, i) => (
                 <MaterialCommunityIcons
@@ -143,95 +336,200 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
             </View>
           </View>
           <Text style={styles.reviewComment}>{review.comment}</Text>
-          <Text style={styles.reviewDate}>{review.date}</Text>
-        </View>
-      ))}
-    </View>
-  );
-
-  const renderBusinessHours = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Business Hours</Text>
-      </View>
-      {businessHours.map((hours) => (
-        <View key={hours.day} style={styles.hoursRow}>
-          <View style={styles.dayContainer}>
-            <Text style={styles.dayText}>{hours.day}</Text>
-            <View style={[
-              styles.statusIndicator, 
-              { backgroundColor: hours.isOpen ? '#4CAF50' : '#FF5722' }
-            ]} />
-          </View>
-          <Text style={styles.hoursText}>
-            {hours.isOpen ? `${hours.start} - ${hours.end}` : 'Closed'}
+          <Text style={styles.reviewDate}>
+            {new Date(review.created_at).toLocaleDateString()}
           </Text>
         </View>
       ))}
     </View>
   );
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-      <ScrollView style={styles.scrollView} stickyHeaderIndices={[1]}>
-        {/* Header */}
-        <View style={styles.headerContainer}>
-          <LinearGradient
-            colors={['#FF5722', '#FF8A65']}
-            style={styles.headerBackground}
-          />
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitials}>{getInitials(name)}</Text>
-            </View>
-          </View>
-        </View>
+  const groupServicesByCategory = () => {
+    console.log('Grouping services by category:', profileData.services);
+    const grouped = {} as Record<ServiceCategory, Service[]>;
+    
+    // Initialize categories
+    Object.values(SERVICE_CATEGORIES).forEach(category => {
+      grouped[category] = [];
+    });
+    
+    // Create a Set to track unique service IDs
+    const processedServiceIds = new Set<string>();
+    
+    // Group services, ensuring no duplicates
+    profileData.services.forEach(service => {
+      // Skip if we've already processed this service
+      if (processedServiceIds.has(service.id)) {
+        console.log('Skipping duplicate service:', service.id);
+        return;
+      }
+      
+      if (service.category && grouped[service.category]) {
+        grouped[service.category].push(service);
+        processedServiceIds.add(service.id);
+      } else {
+        console.warn('Service with invalid category:', service);
+      }
+    });
+    
+    console.log('Grouped services (unique):', grouped);
+    return grouped;
+  };
 
-        {/* Profile Info */}
-        <View style={styles.profileInfo}>
-          <Text style={styles.name}>{name}</Text>
-          <Text style={styles.title}>{title}</Text>
-          <View style={styles.statsContainer}>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>4.9</Text>
-              <Text style={styles.statLabel}>Rating</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>142</Text>
-              <Text style={styles.statLabel}>Reviews</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>3y+</Text>
-              <Text style={styles.statLabel}>Experience</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* About Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>About</Text>
-          </View>
-          <Text style={styles.aboutText}>{about}</Text>
-        </View>
-
-        {/* Services Section */}
+  const renderServices = () => {
+    console.log('Rendering services:', profileData.services);
+    
+    if (!profileData.services || profileData.services.length === 0) {
+      return (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Services</Text>
           </View>
-          <View style={styles.servicesContainer}>
-            {services.map((service) => renderServiceCard(service))}
-          </View>
+          <Text style={styles.noServicesText}>No services available</Text>
         </View>
+      );
+    }
 
-        {renderBusinessHours()}
-        {renderReviews()}
-      </ScrollView>
-      <CustomerNavigationBar />
+    const groupedServices = groupServicesByCategory();
+    
+    // Only show categories that have services
+    const categoriesWithServices = Object.entries(groupedServices)
+      .filter(([_, services]) => services.length > 0);
+
+    if (categoriesWithServices.length === 0) {
+      return (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Services</Text>
+          </View>
+          <Text style={styles.noServicesText}>No services available</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Services</Text>
+        </View>
+        {categoriesWithServices.map(([category, services]) => (
+          <View key={category} style={styles.categoryContainer}>
+            <Text style={styles.categoryTitle}>{category}</Text>
+            {services.map(renderServiceCard)}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style="light" />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="light" />
+      <View style={styles.container}>
+        <ScrollView style={styles.scrollView}>
+          {/* Banner */}
+          <View style={styles.bannerContainer}>
+            {profileData.bannerImage ? (
+              <Image source={{ uri: profileData.bannerImage }} style={styles.bannerImage} />
+            ) : (
+              <LinearGradient colors={['#FF5722', '#FF8A65']} style={styles.bannerPlaceholder} />
+            )}
+          </View>
+
+          {/* Profile Image */}
+          <View style={styles.profileImageContainer}>
+            {profileData.profileImage ? (
+              <Image source={{ uri: profileData.profileImage }} style={styles.profileImage} />
+            ) : (
+              <View style={styles.profileImagePlaceholder}>
+                <MaterialCommunityIcons name="account" size={32} color="#FFFFFF" />
+              </View>
+            )}
+          </View>
+
+          {/* Profile Info */}
+          <View style={styles.profileInfo}>
+            <View style={styles.profileHeader}>
+              <View>
+                <Text style={styles.businessName}>{`${profileData.name} @ ${profileData.businessName}`}</Text>
+                <Text style={styles.category}>{profileData.category || 'Category not set'}</Text>
+                <Text style={styles.title}>{profileData.title}</Text>
+                
+                {/* Contact Information */}
+                <View style={styles.contactInfo}>
+                  {profileData.address && (
+                    <View style={styles.contactItem}>
+                      <MaterialCommunityIcons name="map-marker" size={16} color="#666666" />
+                      <Text style={[styles.contactText, styles.addressText]}>
+                        {[
+                          profileData.address.address_line_1,
+                          profileData.address.address_line_2,
+                          profileData.address.city,
+                          profileData.address.county,
+                          profileData.address.postcode
+                        ].filter(Boolean).join('\n')}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {profileData.phone && (
+                    <View style={styles.contactItem}>
+                      <MaterialCommunityIcons name="phone" size={16} color="#666666" />
+                      <Text style={styles.contactText}>{profileData.phone}</Text>
+                    </View>
+                  )}
+                  
+                  {profileData.email && (
+                    <View style={styles.contactItem}>
+                      <MaterialCommunityIcons name="email" size={16} color="#666666" />
+                      <Text style={styles.contactText}>{profileData.email}</Text>
+                    </View>
+                  )}
+                  
+                  {profileData.website && (
+                    <View style={styles.contactItem}>
+                      <MaterialCommunityIcons name="web" size={16} color="#666666" />
+                      <Text style={styles.contactText}>{profileData.website}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.stats}>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{profileData.rating.toFixed(1)}</Text>
+                <Text style={styles.statLabel}>Rating</Text>
+              </View>
+              <View style={styles.stat}>
+                <Text style={styles.statValue}>{profileData.reviewCount}</Text>
+                <Text style={styles.statLabel}>Reviews</Text>
+              </View>
+            </View>
+            <Text style={styles.about}>{profileData.about}</Text>
+          </View>
+
+          {/* Services */}
+          {renderServices()}
+
+          {/* Business Hours */}
+          {renderBusinessHours()}
+
+          {/* Reviews */}
+          {renderReviews()}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 };
@@ -241,65 +539,110 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  container: {
+    flex: 1,
+  },
   scrollView: {
     flex: 1,
   },
-  headerContainer: {
-    height: HEADER_HEIGHT + AVATAR_SIZE / 2,
-    marginBottom: AVATAR_SIZE / 2,
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+  loadingText: {
+    fontSize: 16,
+    color: '#666666',
+  },
+  bannerContainer: {
     height: HEADER_HEIGHT,
   },
-  avatarContainer: {
-    position: 'absolute',
-    bottom: -AVATAR_SIZE / 2,
-    left: (SCREEN_WIDTH - AVATAR_SIZE) / 2,
+  bannerImage: {
+    width: '100%',
+    height: '100%',
   },
-  avatar: {
+  bannerPlaceholder: {
+    width: '100%',
+    height: '100%',
+  },
+  profileImageContainer: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    marginTop: -AVATAR_SIZE / 2,
+    marginLeft: 20,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  profileImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: AVATAR_SIZE / 2,
+  },
+  profileImagePlaceholder: {
+    width: '100%',
+    height: '100%',
     borderRadius: AVATAR_SIZE / 2,
     backgroundColor: '#FF5722',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-  },
-  avatarInitials: {
-    color: '#FFFFFF',
-    fontSize: 36,
-    fontWeight: 'bold',
   },
   profileInfo: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    padding: 20,
   },
-  name: {
+  profileHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  businessName: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333333',
-    marginTop: 8,
+    marginBottom: 4,
+  },
+  category: {
+    fontSize: 16,
+    color: '#FF5722',
+    fontWeight: '500',
+    marginBottom: 4,
   },
   title: {
     fontSize: 16,
     color: '#666666',
-    marginTop: 4,
   },
-  statsContainer: {
+  contactInfo: {
+    marginTop: 12,
+    gap: 8,
+  },
+  contactItem: {
     flexDirection: 'row',
-    marginTop: 16,
-    paddingHorizontal: 16,
+    alignItems: 'center',
+    gap: 8,
+  },
+  contactText: {
+    fontSize: 14,
+    color: '#666666',
+    flex: 1,
+  },
+  addressText: {
+    lineHeight: 20,
+  },
+  stats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#EEEEEE',
   },
   stat: {
-    flex: 1,
     alignItems: 'center',
   },
   statValue: {
@@ -308,20 +651,20 @@ const styles = StyleSheet.create({
     color: '#333333',
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: '#666666',
     marginTop: 4,
   },
-  statDivider: {
-    width: 1,
-    height: '100%',
-    backgroundColor: '#EEEEEE',
-    marginHorizontal: 16,
+  about: {
+    fontSize: 16,
+    color: '#666666',
+    marginTop: 16,
+    lineHeight: 24,
   },
   section: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -330,62 +673,78 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '600',
     color: '#333333',
   },
-  aboutText: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
-  },
-  servicesContainer: {
-    gap: 12,
-  },
   serviceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 3,
   },
-  serviceImagePlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
+  serviceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  serviceInitials: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  serviceContent: {
-    flex: 1,
+    marginBottom: 8,
   },
   serviceName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 4,
+  },
+  serviceCategory: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 2,
+  },
+  serviceDescription: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 12,
   },
   serviceDetails: {
     flexDirection: 'row',
     gap: 16,
+    marginBottom: 12,
   },
   serviceDetail: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
   serviceDetailText: {
-    marginLeft: 4,
+    fontSize: 14,
+    color: '#666666',
+  },
+  serviceImagesContainer: {
+    marginVertical: 8,
+  },
+  serviceCardImage: {
+    width: 120,
+    height: 90,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  hourRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  dayText: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  hoursText: {
+    fontSize: 16,
     color: '#666666',
   },
   reviewCard: {
@@ -422,31 +781,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999999',
   },
-  hoursRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  bookServiceButton: {
+    backgroundColor: '#FF5722',
+    padding: 12,
+    borderRadius: 8,
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    marginTop: 8,
   },
-  dayContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  bookServiceButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  dayText: {
-    fontSize: 14,
+  categoryContainer: {
+    marginBottom: 20,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '600',
     color: '#333333',
-    width: 100,
+    marginBottom: 12,
+    marginTop: 8,
   },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  hoursText: {
-    fontSize: 14,
+  noServicesText: {
+    fontSize: 16,
     color: '#666666',
+    textAlign: 'center',
+    marginTop: 16,
   },
 });

@@ -14,9 +14,25 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import MapView, { Marker, Callout } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { CustomerNavigationBar } from '../../components/CustomerNavigationBar';
 import { Typography } from '../../components/Typography';
 import { useNavigation } from '@react-navigation/native';
+import { supabase } from '../../lib/supabase';
+import { Professional, Category } from '../../types/schema';
+
+const getCoordinatesFromAddress = async (address: string) => {
+  try {
+    const geocodedLocation = await Location.geocodeAsync(address);
+    
+    if (geocodedLocation && geocodedLocation.length > 0) {
+      const { latitude, longitude } = geocodedLocation[0];
+      return { latitude, longitude };
+    }
+    return null;
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    return null;
+  }
+};
 
 export const CustomerSearchScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -28,91 +44,54 @@ export const CustomerSearchScreen = () => {
   });
   const [errorMsg, setErrorMsg] = useState(null);
   const navigation = useNavigation();
+  const [categories] = useState([
+    { id: 1, name: 'HAIR', icon: 'content-cut' },
+    { id: 2, name: 'NAILS', icon: 'hand-back-right-outline' },
+    { id: 3, name: 'LASHES', icon: 'eye' },
+  ]);
+  const [nearbyServices, setNearbyServices] = useState<(Professional & { 
+    coordinates: { latitude: number; longitude: number } 
+  })[]>([]);
 
-  // Sample nearby services data
-  const nearbyServices = [
-    {
-      id: 1,
-      name: "Sarah's Hair Salon",
-      rating: 4.8,
-      category: "Hair",
-      latitude: 51.4620,  // Clapham
-      longitude: -0.1680,
-      description: "Expert hair styling and coloring services"
-    },
-    {
-      id: 2,
-      name: "Luxury Nails",
-      rating: 4.6,
-      category: "Nails",
-      latitude: 51.4099,  // Mitcham
-      longitude: -0.1667,
-      description: "Premium nail care and designs"
-    },
-    {
-      id: 3,
-      name: "Lash Perfect",
-      rating: 4.9,
-      category: "Lashes",
-      latitude: 51.4067,  // Crystal Palace
-      longitude: -0.0825,
-      description: "Expert lash extensions and styling"
-    },
-    {
-      id: 4,
-      name: "Style Studio Hair",
-      rating: 4.7,
-      category: "Hair",
-      latitude: 51.4024,  // Bromley
-      longitude: 0.0198,
-      description: "Hair cutting, coloring, and styling services"
-    },
-    {
-      id: 5,
-      name: "Nail Art & Beauty",
-      rating: 4.8,
-      category: "Nails",
-      latitude: 51.4316,  // Tooting
-      longitude: -0.1686,
-      description: "Nail art, gel extensions, and beauty services"
-    },
-    {
-      id: 6,
-      name: "London Lashes & Beauty",
-      rating: 4.7,
-      category: "Lashes",
-      latitude: 51.4277,  // Tooting Broadway
-      longitude: -0.1682,
-      description: "Lash extensions, makeup, and beauty services"
-    },
-    {
-      id: 7,
-      name: "Glamour Hair Boutique",
-      rating: 4.9,
-      category: "Hair",
-      latitude: 51.4519,  // Clapham South
-      longitude: -0.1477,
-      description: "Hair cutting, coloring, and styling services"
-    },
-    {
-      id: 8,
-      name: "Crystal Nails London",
-      rating: 4.5,
-      category: "Nails",
-      latitude: 51.4180,  // Crystal Palace
-      longitude: -0.0843,
-      description: "Nail care, gel extensions, and beauty services"
-    },
-    {
-      id: 9,
-      name: "Flutter Beauty Bar",
-      rating: 4.8,
-      category: "Lashes",
-      latitude: 51.4060,  // Bromley North
-      longitude: 0.0176,
-      description: "Lash extensions, makeup, and beauty services"
+  const fetchData = async () => {
+    try {
+      const { data: professionals, error: professionalsError } = await supabase
+        .from('professionals')
+        .select('*');
+
+      if (professionalsError) throw professionalsError;
+
+      const professionalsWithCoords = await Promise.all(
+        (professionals || []).map(async (professional) => {
+          if (professional.address) {
+            const coords = await getCoordinatesFromAddress(professional.address);
+            return {
+              ...professional,
+              coordinates: coords || { 
+                latitude: location.latitude, 
+                longitude: location.longitude 
+              }
+            };
+          }
+          return {
+            ...professional,
+            coordinates: { 
+              latitude: location.latitude, 
+              longitude: location.longitude 
+            }
+          };
+        })
+      );
+
+      setNearbyServices(professionalsWithCoords);
+    } catch (error) {
+      console.error('Error fetching data:', error);
     }
-  ];
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -132,20 +111,20 @@ export const CustomerSearchScreen = () => {
     })();
   }, []);
 
-  const categories = [
-    { name: 'Hair', icon: 'content-cut' },
-    { name: 'Nails', icon: 'hand-back-right-outline' },
-    { name: 'Lashes', icon: 'eye' },
-  ];
-
   const renderCategories = () => (
     <View style={styles.categoriesContainer}>
       {categories.map((category) => (
-        <View key={category.name} style={styles.categoryItem}>
+        <View key={category.id} style={styles.categoryItem}>
           <View style={styles.categoryIcon}>
-            <MaterialCommunityIcons name={category.icon} size={24} color="#FF5722" />
+            <MaterialCommunityIcons 
+              name={category.icon as any} 
+              size={24} 
+              color="#FF5722" 
+            />
           </View>
-          <Typography variant="caption" style={styles.categoryName}>{category.name}</Typography>
+          <Typography variant="caption" style={styles.categoryName}>
+            {category.name}
+          </Typography>
         </View>
       ))}
     </View>
@@ -161,32 +140,53 @@ export const CustomerSearchScreen = () => {
         {nearbyServices.map((service) => (
           <Marker
             key={service.id}
-            coordinate={{
-              latitude: service.latitude,
-              longitude: service.longitude,
-            }}
+            coordinate={service.coordinates}
           >
             <View style={styles.markerContainer}>
               <MaterialCommunityIcons
-                name={categories.find(cat => cat.name === service.category)?.icon || 'store'}
+                name={
+                  service.category?.toLowerCase() === 'hair' ? 'content-cut' :
+                  service.category?.toLowerCase() === 'nails' ? 'hand-back-right-outline' :
+                  service.category?.toLowerCase() === 'lashes' ? 'eye' : 'store'
+                }
                 size={24}
                 color="#FF5722"
               />
             </View>
             <Callout tooltip onPress={() => {
-              navigation.navigate('CustomerViewProfessional', { 
+              navigation.navigate('CustomerViewProfessional' as never, { 
                 professionalId: service.id,
-                name: service.name,
+                name: service.business_name,
                 rating: service.rating,
                 category: service.category,
-                description: service.description
-              });
+                description: service.about
+              } as never);
             }}>
               <View style={styles.calloutContainer}>
                 <View style={styles.calloutContent}>
+                  <Image
+                    source={{ 
+                      uri: service.profile_image || 'https://via.placeholder.com/100'
+                    }}
+                    style={styles.calloutImage}
+                  />
                   <Typography variant="body1" style={styles.calloutTitle}>
-                    {service.name}
+                    {service.business_name}
                   </Typography>
+                  <View style={styles.calloutCategoryContainer}>
+                    <MaterialCommunityIcons 
+                      name={
+                        service.category?.toLowerCase() === 'hair' ? 'content-cut' :
+                        service.category?.toLowerCase() === 'nails' ? 'hand-back-right-outline' :
+                        service.category?.toLowerCase() === 'lashes' ? 'eye' : 'store'
+                      }
+                      size={16} 
+                      color="#FF5722" 
+                    />
+                    <Typography variant="caption" style={styles.calloutCategory}>
+                      {service.category?.toUpperCase()}
+                    </Typography>
+                  </View>
                   <View style={styles.ratingContainer}>
                     <MaterialCommunityIcons name="star" size={16} color="#FFD700" />
                     <Typography variant="caption" style={styles.rating}>
@@ -194,7 +194,7 @@ export const CustomerSearchScreen = () => {
                     </Typography>
                   </View>
                   <Typography variant="caption" style={styles.calloutDescription}>
-                    {service.description}
+                    {service.about}
                   </Typography>
                   <View style={styles.viewProfileButton}>
                     <Typography variant="button" style={styles.viewProfileButtonText}>
@@ -215,16 +215,35 @@ export const CustomerSearchScreen = () => {
       {nearbyServices.map((service) => (
         <View key={service.id} style={styles.resultCard}>
           <Image
-            source={{ uri: 'https://via.placeholder.com/100' }}
+            source={{ 
+              uri: service.profile_image || 'https://via.placeholder.com/100'
+            }}
             style={styles.resultImage}
           />
           <View style={styles.resultInfo}>
-            <Typography variant="body1" style={styles.resultTitle}>{service.name}</Typography>
-            <Typography variant="caption" style={styles.resultService}>{service.category}</Typography>
+            <Typography variant="body1" style={styles.resultTitle}>
+              {service.business_name}
+            </Typography>
+            <View style={styles.categoryContainer}>
+              <MaterialCommunityIcons 
+                name={
+                  service.category?.toLowerCase() === 'hair' ? 'content-cut' :
+                  service.category?.toLowerCase() === 'nails' ? 'hand-back-right-outline' :
+                  service.category?.toLowerCase() === 'lashes' ? 'eye' : 'store'
+                }
+                size={16} 
+                color="#FF5722" 
+              />
+              <Typography variant="caption" style={styles.resultService}>
+                {service.category?.toUpperCase()}
+              </Typography>
+            </View>
             <View style={styles.resultDetails}>
               <View style={styles.ratingContainer}>
                 <MaterialCommunityIcons name="star" size={16} color="#FFD700" />
-                <Typography variant="caption" style={styles.rating}>{service.rating}</Typography>
+                <Typography variant="caption" style={styles.rating}>
+                  {service.rating}
+                </Typography>
               </View>
               <View style={styles.locationContainer}>
                 <MaterialCommunityIcons name="map-marker" size={16} color="#666" />
@@ -234,13 +253,13 @@ export const CustomerSearchScreen = () => {
             <TouchableOpacity
               style={styles.viewProfileButtonList}
               onPress={() => {
-                navigation.navigate('CustomerViewProfessional', { 
+                navigation.navigate('CustomerViewProfessional' as never, { 
                   professionalId: service.id,
-                  name: service.name,
+                  name: service.business_name,
                   rating: service.rating,
                   category: service.category,
-                  description: service.description
-                });
+                  description: service.about
+                } as never);
               }}
             >
               <Typography variant="button" style={styles.viewProfileButtonText}>
@@ -275,7 +294,6 @@ export const CustomerSearchScreen = () => {
         {renderMap()}
         {renderSearchResults()}
       </ScrollView>
-      <CustomerNavigationBar />
     </SafeAreaView>
   );
 };
@@ -286,23 +304,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   searchContainer: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    padding: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+    backgroundColor: '#FFF',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#FFF8F6',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#FFE5E0',
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    marginBottom: 8,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
+    marginLeft: 12,
     fontSize: 16,
+    color: '#1A1A1A',
   },
   content: {
     flex: 1,
@@ -310,42 +343,67 @@ const styles = StyleSheet.create({
   categoriesContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingVertical: 16,
+    paddingTop: 8,
+    paddingBottom: 20,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
+    marginHorizontal: -20,
+    paddingHorizontal: 20,
   },
   categoryItem: {
     alignItems: 'center',
+    width: 80,
+    paddingHorizontal: 4,
   },
   categoryIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFF3E0',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFF8F6',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
+    borderWidth: 1.5,
+    borderColor: '#FFE5E0',
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   categoryName: {
-    color: '#333333',
+    color: '#FF5722',
+    fontWeight: '600',
+    fontSize: 12,
+    letterSpacing: 0.5,
   },
   mapContainer: {
-    height: 350,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
+    height: 450,
+    marginHorizontal: 20,
+    marginVertical: 16,
+    borderRadius: 24,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   map: {
     flex: 1,
   },
   markerContainer: {
     backgroundColor: '#FFFFFF',
-    padding: 8,
-    borderRadius: 20,
+    padding: 12,
+    borderRadius: 24,
     borderWidth: 2,
     borderColor: '#FF5722',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   searchResults: {
     padding: 16,
@@ -353,33 +411,41 @@ const styles = StyleSheet.create({
   resultCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: 24,
+    padding: 16,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    transform: [{ scale: 1 }],
   },
   resultImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-    marginRight: 12,
+    width: 110,
+    height: 110,
+    borderRadius: 20,
+    marginRight: 16,
+    backgroundColor: '#FFF8F6',
   },
   resultInfo: {
     flex: 1,
     justifyContent: 'space-between',
   },
   resultTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333333',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    letterSpacing: -0.3,
+    marginBottom: 6,
   },
   resultService: {
-    color: '#666666',
-    marginVertical: 4,
+    color: '#FF5722',
+    fontWeight: '500',
+    fontSize: 14,
+    marginBottom: 4,
   },
   resultDetails: {
     flexDirection: 'row',
@@ -388,61 +454,118 @@ const styles = StyleSheet.create({
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#FFF8F6',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFE5E0',
     marginRight: 12,
   },
   rating: {
     marginLeft: 4,
-    color: '#666666',
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
   },
   locationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F8F8F8',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   location: {
     marginLeft: 4,
-    color: '#666666',
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
   },
   calloutContainer: {
-    width: 200,
-    backgroundColor: 'white',
-    borderRadius: 8,
+    width: 260,
+    backgroundColor: '#FFF',
+    borderRadius: 20,
     padding: 0,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 6,
+    overflow: 'hidden',
   },
   calloutContent: {
-    padding: 12,
+    padding: 16,
   },
   calloutTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    letterSpacing: -0.3,
+    marginBottom: 8,
   },
   calloutDescription: {
     color: '#666',
-    marginTop: 4,
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
   },
   viewProfileButton: {
     backgroundColor: '#FF5722',
-    padding: 8,
-    borderRadius: 4,
-    marginTop: 8,
+    padding: 14,
+    borderRadius: 16,
+    marginTop: 12,
     alignItems: 'center',
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   viewProfileButtonText: {
     color: '#FFFFFF',
-    fontWeight: '600',
+    fontWeight: '700',
     fontSize: 14,
+    letterSpacing: 0.5,
   },
   viewProfileButtonList: {
     backgroundColor: '#FF5722',
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     alignSelf: 'flex-start',
-    marginTop: 8,
+    marginTop: 12,
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  categoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  calloutImage: {
+    width: '100%',
+    height: 140,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    marginBottom: 12,
+    backgroundColor: '#FFF8F6',
+  },
+  calloutCategoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  calloutCategory: {
+    color: '#FF5722',
+    fontWeight: '500',
+    fontSize: 14,
+    marginLeft: 4,
   },
 });

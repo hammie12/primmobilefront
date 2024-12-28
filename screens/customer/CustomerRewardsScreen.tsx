@@ -1,74 +1,143 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
+  View as LoadingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { CustomerNavigationBar } from '../../components/CustomerNavigationBar';
 import { Typography } from '../../components/Typography';
+import { supabase } from '../../lib/supabase';
+import { Reward, PointsActivity, UserRewards } from '../../types/rewards';
+import { useAuth } from '../../contexts/AuthContext';
+
+const LoadingScreen = () => (
+  <LoadingView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+    <ActivityIndicator size="large" color="#FF5722" />
+  </LoadingView>
+);
+
+interface ExtendedPointsActivity extends PointsActivity {
+  service_name: string;
+  business_name: string;
+  amount: number;
+}
 
 export const CustomerRewardsScreen = () => {
-  // Mock user data
-  const userPoints = 150; // Points after 3 £50 bookings
-  const pointsToReward = 250; // Points needed for 20% discount
-  const bookingsCount = 3;
-  const bookingsNeeded = 5;
+  const { user } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
+  const [userRewards, setUserRewards] = useState<UserRewards>({
+    total_points: 0,
+    bookings_count: 0
+  });
+  const [activities, setActivities] = useState<ExtendedPointsActivity[]>([]);
+  
+  const BOOKINGS_NEEDED = 5; // Could move to env or rewards config
+  const POINTS_FOR_DISCOUNT = 250;
 
-  // Mock rewards data
-  const availableRewards = [
-    {
-      id: 1,
-      name: "20% Off Next Appointment",
-      points: 250,
-      description: "Get 20% off your next beauty service booking",
-      icon: "ticket-percent",
+  useEffect(() => {
+    if (user) {
+      loadRewardsData();
     }
-  ];
+  }, [user]);
 
-  // Mock points earning info
-  const pointsInfo = [
-    {
-      id: 1,
-      title: "Book Any Service",
-      description: "Earn 50 PriimPoints for every £50 spent",
-      icon: "calendar-check",
-    },
-    {
-      id: 2,
-      title: "Loyalty Milestone",
-      description: "Complete 5 bookings to earn a 20% discount",
-      icon: "star-circle",
+  const loadRewardsData = async () => {
+    try {
+      setIsLoading(true);
+      
+      if (!user) return;
+
+      // Get customer profile first
+      const { data: customerProfile, error: customerError } = await supabase
+        .from('customer_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (customerError) throw customerError;
+
+      // Get rewards profile
+      const { data: rewardsProfile, error: rewardsError } = await supabase
+        .from('rewards_profiles')
+        .select('*')
+        .eq('customer_profile_id', customerProfile.id)
+        .single();
+
+      if (rewardsError) {
+        console.error('Rewards error:', rewardsError);
+      }
+
+      // Set user rewards from rewards profile
+      setUserRewards({
+        total_points: rewardsProfile?.points || 0,
+        bookings_count: 0 // This will be updated from bookings count
+      });
+
+      // Fetch recent bookings
+      const { data: bookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          start_time,
+          service_id,
+          professional_id,
+          services (
+            name,
+            price
+          ),
+          professional_profiles (
+            business_name
+          )
+        `)
+        .eq('customer_id', customerProfile.id)
+        .eq('status', 'CONFIRMED')
+        .order('start_time', { ascending: false })
+        .limit(3);
+
+      if (bookingsError) {
+        console.error('Bookings error:', bookingsError);
+        throw bookingsError;
+      }
+
+      console.log('Fetched bookings:', bookings);
+
+      // Transform booking data into activity format
+      const transformedActivities = (bookings || []).map(booking => ({
+        id: booking.id,
+        type: 'earned' as const,
+        points: Math.floor((booking.services?.price || 0) / 10), // 1 point per £10 spent
+        description: `Booking with ${booking.professional_profiles?.business_name}`,
+        created_at: booking.start_time,
+        service_name: booking.services?.name || 'Service',
+        business_name: booking.professional_profiles?.business_name || 'Business',
+        amount: booking.services?.price || 0
+      }));
+
+      console.log('Transformed activities:', transformedActivities);
+      
+      setActivities(transformedActivities);
+
+      // Update bookings count in user rewards
+      setUserRewards(prev => ({
+        ...prev,
+        bookings_count: bookings?.length || 0
+      }));
+
+    } catch (error) {
+      console.error('Error loading rewards data:', error);
+    } finally {
+      setIsLoading(false);
     }
-  ];
+  };
 
-  const recentActivity = [
-    {
-      id: 1,
-      type: "earned",
-      points: 50,
-      description: "Haircut Service - £50",
-      date: "2024-01-15",
-    },
-    {
-      id: 2,
-      type: "earned",
-      points: 50,
-      description: "Nail Service - £50",
-      date: "2024-01-10",
-    },
-    {
-      id: 3,
-      type: "earned",
-      points: 50,
-      description: "Lash Service - £50",
-      date: "2024-01-05",
-    },
-  ];
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
 
   const renderPointsCard = () => (
     <View style={styles.pointsCard}>
@@ -78,24 +147,35 @@ export const CustomerRewardsScreen = () => {
             <MaterialCommunityIcons name="crown" size={24} color="#FFD700" />
             <Typography variant="body2" style={styles.tierLabel}>PriimPoints</Typography>
           </View>
-          <Typography variant="h1" style={styles.pointsText}>{userPoints}</Typography>
+          <Typography variant="h1" style={styles.pointsText}>{userRewards.total_points}</Typography>
           <Typography variant="caption" style={styles.pointsLabel}>POINTS BALANCE</Typography>
         </View>
         <View style={styles.pointsCardRight}>
           <View style={styles.nextTierContainer}>
             <Typography variant="caption" style={styles.nextTierLabel}>Progress to Reward</Typography>
-            <Typography variant="body1" style={styles.nextTierText}>{bookingsCount}/{bookingsNeeded} Bookings</Typography>
+            <Typography variant="body1" style={styles.nextTierText}>
+              {userRewards.bookings_count}/{BOOKINGS_NEEDED} Bookings
+            </Typography>
             <Typography variant="caption" style={styles.pointsToNext}>
-              {pointsToReward - userPoints} points to 20% discount
+              {POINTS_FOR_DISCOUNT - userRewards.total_points} points to 20% discount
             </Typography>
           </View>
           <View style={styles.progressBarContainer}>
             <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${(userPoints / pointsToReward) * 100}%` }]} />
+              <View 
+                style={[
+                  styles.progressFill, 
+                  { width: `${(userRewards.total_points / POINTS_FOR_DISCOUNT) * 100}%` }
+                ]} 
+              />
             </View>
             <View style={styles.progressLabels}>
-              <Typography variant="caption" style={styles.progressStart}>{userPoints}</Typography>
-              <Typography variant="caption" style={styles.progressEnd}>{pointsToReward}</Typography>
+              <Typography variant="caption" style={styles.progressStart}>
+                {userRewards.total_points}
+              </Typography>
+              <Typography variant="caption" style={styles.progressEnd}>
+                {POINTS_FOR_DISCOUNT}
+              </Typography>
             </View>
           </View>
         </View>
@@ -106,68 +186,83 @@ export const CustomerRewardsScreen = () => {
   const renderRewards = () => (
     <View style={styles.rewardsSection}>
       <Typography variant="h2" style={styles.sectionTitle}>Available Rewards</Typography>
-      {availableRewards.map((reward) => (
-        <TouchableOpacity key={reward.id} style={styles.rewardCard}>
-          <View style={styles.rewardIcon}>
-            <MaterialCommunityIcons name={reward.icon} size={24} color="#FF5722" />
-          </View>
-          <View style={styles.rewardInfo}>
-            <Typography variant="body1" style={styles.rewardName}>{reward.name}</Typography>
-            <Typography variant="caption" style={styles.rewardDescription}>{reward.description}</Typography>
-          </View>
-          <View style={styles.rewardPoints}>
-            <Typography variant="body2" style={styles.pointsRequired}>{reward.points}</Typography>
-            <Typography variant="caption" style={styles.pointsLabel}>points</Typography>
-          </View>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-
-  const renderPointsInfo = () => (
-    <View style={styles.rewardsSection}>
-      <Typography variant="h2" style={styles.sectionTitle}>How to Earn Points</Typography>
-      {pointsInfo.map((info) => (
-        <View key={info.id} style={styles.infoCard}>
-          <View style={styles.rewardIcon}>
-            <MaterialCommunityIcons name={info.icon} size={24} color="#FF5722" />
-          </View>
-          <View style={styles.rewardInfo}>
-            <Typography variant="body1" style={styles.rewardName}>{info.title}</Typography>
-            <Typography variant="caption" style={styles.rewardDescription}>{info.description}</Typography>
-          </View>
+      <TouchableOpacity style={styles.rewardCard}>
+        <View style={styles.rewardIcon}>
+          <MaterialCommunityIcons name="ticket-percent" size={24} color="#FF5722" />
         </View>
-      ))}
+        <View style={styles.rewardInfo}>
+          <Typography variant="body1" style={styles.rewardName}>20% Discount on Next Appointment</Typography>
+          <Typography variant="caption" style={styles.rewardDescription}>
+            Redeem 250 PriimPoints for a 20% discount on your next appointment
+          </Typography>
+          <Typography variant="caption" style={[styles.rewardDescription, styles.rewardNote]}>
+            Complete 5 bookings of £50 each to earn 250 PriimPoints
+          </Typography>
+        </View>
+        <View style={styles.rewardPoints}>
+          <Typography variant="body2" style={styles.pointsRequired}>250</Typography>
+          <Typography variant="caption" style={styles.pointsLabel}>points</Typography>
+        </View>
+      </TouchableOpacity>
     </View>
   );
 
   const renderActivity = () => (
     <View style={styles.activitySection}>
-      <Typography variant="h2" style={styles.sectionTitle}>Recent Activity</Typography>
-      {recentActivity.map((activity) => (
-        <View key={activity.id} style={styles.activityItem}>
-          <View style={styles.activityIcon}>
-            <MaterialCommunityIcons
-              name={activity.type === 'earned' ? 'plus-circle' : 'minus-circle'}
-              size={24}
-              color={activity.type === 'earned' ? '#4CAF50' : '#FF5722'}
-            />
-          </View>
-          <View style={styles.activityInfo}>
-            <Typography variant="body2" style={styles.activityDescription}>{activity.description}</Typography>
-            <Typography variant="caption" style={styles.activityDate}>{activity.date}</Typography>
-          </View>
-          <Typography
-            variant="body2"
-            style={[
-              styles.activityPoints,
-              { color: activity.type === 'earned' ? '#4CAF50' : '#FF5722' }
-            ]}
+      <Typography variant="h2" style={styles.sectionTitle}>Recent Bookings</Typography>
+      {activities.length > 0 ? (
+        activities.map((activity) => (
+          <TouchableOpacity 
+            key={activity.id} 
+            style={styles.bookingCard}
+            onPress={() => console.log('Activity details:', activity)} // Debug press handler
           >
-            {activity.type === 'earned' ? '+' : '-'}{activity.points}
+            <View style={styles.bookingHeader}>
+              <Typography variant="body1" style={styles.bookingTitle}>
+                {activity.service_name || 'Service'}
+              </Typography>
+              <Typography variant="caption" style={styles.bookingDate}>
+                {new Date(activity.created_at).toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                })}
+              </Typography>
+            </View>
+            <View style={styles.bookingDetails}>
+              <MaterialCommunityIcons name="store" size={20} color="#FF5722" />
+              <Typography variant="caption" style={styles.bookingService}>
+                {activity.business_name || 'Business'}
+              </Typography>
+            </View>
+            <View style={styles.bookingFooter}>
+              <View style={styles.bookingTimeContainer}>
+                <MaterialCommunityIcons name="clock-outline" size={20} color="#FF5722" />
+                <Typography variant="caption" style={styles.bookingTime}>
+                  {new Date(activity.created_at).toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                  })}
+                </Typography>
+              </View>
+              <View style={styles.pointsEarned}>
+                <MaterialCommunityIcons name="star" size={20} color="#FFD700" />
+                <Typography variant="caption" style={styles.pointsText}>
+                  +{activity.points} points
+                </Typography>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))
+      ) : (
+        <View style={styles.noBookingsContainer}>
+          <MaterialCommunityIcons name="calendar-blank" size={48} color="#CCC" />
+          <Typography variant="body1" style={styles.noBookingsText}>
+            No recent bookings
           </Typography>
         </View>
-      ))}
+      )}
     </View>
   );
 
@@ -177,10 +272,8 @@ export const CustomerRewardsScreen = () => {
       <ScrollView style={styles.content}>
         {renderPointsCard()}
         {renderRewards()}
-        {renderPointsInfo()}
         {renderActivity()}
       </ScrollView>
-      <CustomerNavigationBar />
     </SafeAreaView>
   );
 };
@@ -365,5 +458,116 @@ const styles = StyleSheet.create({
   },
   activityPoints: {
     fontWeight: '600',
+  },
+  rewardNote: {
+    marginTop: 4,
+    fontStyle: 'italic',
+    color: '#888888',
+  },
+  activityTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  activityPointsContainer: {
+    alignItems: 'flex-end',
+  },
+  activityAmount: {
+    color: '#666',
+    marginBottom: 4,
+  },
+  noActivitiesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 16,
+    marginTop: 16,
+  },
+  noActivitiesText: {
+    color: '#666',
+    marginTop: 8,
+  },
+  bookingCard: {
+    marginBottom: 12,
+    padding: 16,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+  },
+  bookingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  bookingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  bookingDate: {
+    color: '#FF5722',
+    fontWeight: '500',
+  },
+  bookingDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8F8F8',
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  bookingService: {
+    marginLeft: 8,
+    color: '#666',
+    fontWeight: '500',
+    flex: 1,
+  },
+  bookingFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  bookingTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8F6',
+    padding: 8,
+    borderRadius: 8,
+  },
+  bookingTime: {
+    marginLeft: 8,
+    color: '#FF5722',
+    fontWeight: '500',
+  },
+  pointsEarned: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8F6',
+    padding: 8,
+    borderRadius: 8,
+  },
+  pointsText: {
+    marginLeft: 8,
+    color: '#FF5722',
+    fontWeight: '500',
+  },
+  noBookingsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 16,
+    marginTop: 16,
+  },
+  noBookingsText: {
+    color: '#666',
+    marginTop: 8,
   },
 });

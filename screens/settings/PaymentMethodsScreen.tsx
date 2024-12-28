@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
+import { Typography } from '../../components/Typography';
+import { useAuth } from '../../contexts/AuthContext';
+import { createSetupIntent, deletePaymentMethod } from '../../lib/stripe';
+import { supabase } from '../../lib/supabase';
+import { useStripe } from '@stripe/stripe-react-native';
 
 interface PaymentMethod {
   id: string;
@@ -18,22 +22,400 @@ interface PaymentMethod {
   isDefault: boolean;
 }
 
-const PaymentMethodsScreen = ({ navigation }) => {
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
-    {
-      id: '1',
-      type: 'stripe',
-      last4: '4242',
-      expiryDate: '12/24',
-      isDefault: true,
-    },
-    {
-      id: '2',
-      type: 'paypal',
-      last4: 'mail@example.com',
-      isDefault: false,
-    },
-  ]);
+export const PaymentMethodsScreen = () => {
+  const { user } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      fetchPaymentMethods();
+    }
+  }, [user]);
+
+  const fetchPaymentMethods = async () => {
+    try {
+      setIsLoading(true);
+      console.log('Fetching payment methods for user:', user?.id);
+      
+      const { data: methods, error } = await supabase
+        .from('payment_methods')
+        .select('*')
+        .eq('user_id', user?.id);
+
+      console.log('Fetched payment methods:', methods);
+      console.log('Fetch error:', error);
+
+      if (error) throw error;
+
+      if (methods) {
+        const formattedMethods = methods.map(method => ({
+          id: method.payment_method_id,
+          type: method.type,
+          last4: method.last4,
+          expiryDate: method.expiry_date,
+          isDefault: method.is_default,
+        }));
+        console.log('Formatted payment methods:', formattedMethods);
+        setPaymentMethods(formattedMethods);
+      }
+    } catch (error) {
+      console.error('Error fetching payment methods:', error);
+      Alert.alert('Error', 'Failed to load payment methods');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddCard = async () => {
+    try {
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to add a payment method');
+        return;
+      }
+      
+      setIsLoading(true);
+      console.log('Creating setup intent...');
+      const { clientSecret } = await createSetupIntent();
+      
+      if (!clientSecret) {
+        console.error('No client secret received');
+        Alert.alert('Error', 'Failed to initialize payment setup');
+        return;
+      }
+
+      console.log('Initializing payment sheet with client secret:', clientSecret);
+      const { error: initError } = await initPaymentSheet({
+        setupIntentClientSecret: clientSecret,
+        merchantDisplayName: 'Prim Beauty',
+        style: 'automatic',
+        returnURL: 'primmobile://stripe-redirect',
+        defaultBillingDetails: {
+          name: user.email,
+          address: {
+            country: 'GB'
+          }
+        },
+        appearance: {
+          colors: {
+            primary: '#FF5722',
+          },
+        },
+        allowsDelayedPaymentMethods: false,
+        billingDetailsCollectionConfiguration: {
+          name: 'required',
+          phone: 'required',
+          email: 'required',
+          address: 'full',
+          defaultValues: {
+            address: {
+              country: 'GB'
+            }
+          }
+        },
+      });
+
+      if (initError) {
+        console.error('Error initializing payment sheet:', initError);
+        Alert.alert('Error', 'Failed to initialize payment setup');
+        return;
+      }
+
+      console.log('Presenting payment sheet...');
+      const { paymentOption, error: presentError } = await presentPaymentSheet();
+      console.log('Payment sheet response:', { paymentOption, presentError });
+
+      if (presentError) {
+        if (presentError.code === 'Canceled') {
+          console.log('User canceled payment sheet');
+          return;
+        }
+        console.error('Error presenting payment sheet:', presentError);
+        Alert.alert('Error', 'Failed to setup payment method');
+        return;
+      }
+
+      // Extract setup intent ID from client secret
+      const setupIntentId = clientSecret.split('_secret_')[0];
+      console.log('Setup intent ID:', setupIntentId);
+
+      // Get setup intent details from Stripe
+      const { data: setupIntent, error: setupError } = await supabase.rpc('get_setup_intent', {
+        client_secret: clientSecret
+      });
+
+      console.log('Setup intent details:', setupIntent);
+      if (setupError) {
+        console.error('Error getting setup intent:', setupError);
+        Alert.alert('Error', 'Failed to confirm payment method setup');
+        return;
+      }
+
+      const paymentMethodId = setupIntent?.payment_method;
+      if (!paymentMethodId) {
+        console.error('No payment method ID in setup intent');
+        Alert.alert('Error', 'Failed to get payment method details');
+        return;
+      }
+
+      // Get payment method details from Stripe
+      const { data: paymentMethod, error: paymentMethodError } = await supabase.rpc('get_payment_method', {
+        payment_method_id: paymentMethodId
+      });
+
+      console.log('Payment method details:', paymentMethod);
+      if (paymentMethodError) {
+        console.error('Error getting payment method:', paymentMethodError);
+        Alert.alert('Error', 'Failed to get payment method details');
+        return;
+      }
+
+      // Save the payment method to our database
+      const { error: saveError } = await supabase
+        .from('payment_methods')
+        .insert({
+          user_id: user.id,
+          payment_method_id: paymentMethodId,
+          type: 'card',
+          last4: paymentMethod?.card?.last4 || '',
+          expiry_date: paymentMethod?.card?.exp_month && paymentMethod?.card?.exp_year
+            ? `${String(paymentMethod.card.exp_month).padStart(2, '0')}/${paymentMethod.card.exp_year}`
+            : undefined,
+          is_default: (await supabase
+            .from('payment_methods')
+            .select('id')
+            .eq('user_id', user.id)
+          ).data?.length === 0, // Make it default if it's the first one
+        });
+
+      if (saveError) {
+        console.error('Error saving payment method:', saveError);
+        Alert.alert('Error', 'Payment method was added but failed to save to database');
+        return;
+      }
+
+      console.log('Payment method saved successfully');
+      Alert.alert('Success', 'Card added successfully');
+      await fetchPaymentMethods();
+    } catch (error) {
+      console.error('Error adding payment method:', error);
+      Alert.alert('Error', error.message || 'Failed to add payment method');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeletePaymentMethod = async (methodId: string) => {
+    try {
+      setIsLoading(true);
+      await deletePaymentMethod(methodId);
+      
+      // Remove from local state
+      setPaymentMethods(prev => prev.filter(method => method.id !== methodId));
+      Alert.alert('Success', 'Payment method removed');
+    } catch (error) {
+      console.error('Error deleting payment method:', error);
+      Alert.alert('Error', 'Failed to remove payment method');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSetDefault = async (methodId: string) => {
+    try {
+      setIsLoading(true);
+      const { error } = await supabase
+        .from('payment_methods')
+        .update({ is_default: true })
+        .eq('payment_method_id', methodId)
+        .eq('user_id', user?.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setPaymentMethods(prev => prev.map(method => ({
+        ...method,
+        isDefault: method.id === methodId,
+      })));
+
+      Alert.alert('Success', 'Default payment method updated');
+    } catch (error) {
+      console.error('Error setting default payment method:', error);
+      Alert.alert('Error', 'Failed to update default payment method');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEditCard = async (methodId: string) => {
+    try {
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to edit a payment method');
+        return;
+      }
+      
+      setIsLoading(true);
+
+      // Get existing payment method details
+      const existingMethod = paymentMethods.find(method => method.id === methodId);
+      if (!existingMethod) {
+        Alert.alert('Error', 'Payment method not found');
+        return;
+      }
+
+      // Get full payment method details from Stripe
+      const { data: existingPaymentMethod, error: existingPaymentMethodError } = await supabase.rpc('get_payment_method', {
+        payment_method_id: methodId
+      });
+
+      if (existingPaymentMethodError) {
+        console.error('Error getting existing payment method:', existingPaymentMethodError);
+        Alert.alert('Error', 'Failed to get existing payment method details');
+        return;
+      }
+
+      console.log('Creating setup intent for editing...');
+      const { clientSecret } = await createSetupIntent();
+      
+      if (!clientSecret) {
+        console.error('No client secret received');
+        Alert.alert('Error', 'Failed to initialize payment setup');
+        return;
+      }
+
+      console.log('Initializing payment sheet for editing with client secret:', clientSecret);
+      const { error: initError } = await initPaymentSheet({
+        setupIntentClientSecret: clientSecret,
+        merchantDisplayName: 'Prim Beauty',
+        style: 'automatic',
+        returnURL: 'primmobile://stripe-redirect',
+        defaultBillingDetails: {
+          name: existingPaymentMethod?.billing_details?.name || user.email,
+          phone: existingPaymentMethod?.billing_details?.phone,
+          email: existingPaymentMethod?.billing_details?.email,
+          address: {
+            ...existingPaymentMethod?.billing_details?.address,
+            country: existingPaymentMethod?.billing_details?.address?.country || 'GB'
+          }
+        },
+        appearance: {
+          colors: {
+            primary: '#FF5722',
+          },
+        },
+        allowsDelayedPaymentMethods: false,
+        billingDetailsCollectionConfiguration: {
+          name: 'required',
+          phone: 'required',
+          email: 'required',
+          address: 'full',
+          attachDefaultsToPaymentMethod: true,
+          defaultValues: {
+            address: {
+              country: 'GB'
+            }
+          }
+        },
+        paymentMethodTypes: ['card'],
+        defaultValues: {
+          billingDetails: {
+            name: existingPaymentMethod?.billing_details?.name || user.email,
+            phone: existingPaymentMethod?.billing_details?.phone,
+            email: existingPaymentMethod?.billing_details?.email,
+            address: {
+              ...existingPaymentMethod?.billing_details?.address,
+              country: existingPaymentMethod?.billing_details?.address?.country || 'GB'
+            }
+          }
+        }
+      });
+
+      if (initError) {
+        console.error('Error initializing payment sheet:', initError);
+        Alert.alert('Error', 'Failed to initialize payment setup');
+        return;
+      }
+
+      console.log('Presenting payment sheet for editing...');
+      const { paymentOption, error: presentError } = await presentPaymentSheet();
+      console.log('Payment sheet response:', { paymentOption, presentError });
+
+      if (presentError) {
+        if (presentError.code === 'Canceled') {
+          console.log('User canceled payment sheet');
+          return;
+        }
+        console.error('Error presenting payment sheet:', presentError);
+        Alert.alert('Error', 'Failed to setup payment method');
+        return;
+      }
+
+      // Extract setup intent ID from client secret
+      const setupIntentId = clientSecret.split('_secret_')[0];
+      console.log('Setup intent ID:', setupIntentId);
+
+      // Get setup intent details from Stripe
+      const { data: setupIntent, error: setupError } = await supabase.rpc('get_setup_intent', {
+        client_secret: clientSecret
+      });
+
+      console.log('Setup intent details:', setupIntent);
+      if (setupError) {
+        console.error('Error getting setup intent:', setupError);
+        Alert.alert('Error', 'Failed to confirm payment method setup');
+        return;
+      }
+
+      const newPaymentMethodId = setupIntent?.payment_method;
+      if (!newPaymentMethodId) {
+        console.error('No payment method ID in setup intent');
+        Alert.alert('Error', 'Failed to get payment method details');
+        return;
+      }
+
+      // Get new payment method details from Stripe
+      const { data: paymentMethod, error: paymentMethodError } = await supabase.rpc('get_payment_method', {
+        payment_method_id: newPaymentMethodId
+      });
+
+      console.log('New payment method details:', paymentMethod);
+      if (paymentMethodError) {
+        console.error('Error getting payment method:', paymentMethodError);
+        Alert.alert('Error', 'Failed to get payment method details');
+        return;
+      }
+
+      // Update the payment method in our database
+      const { error: updateError } = await supabase
+        .from('payment_methods')
+        .update({
+          payment_method_id: newPaymentMethodId,
+          last4: paymentMethod?.card?.last4 || '',
+          expiry_date: paymentMethod?.card?.exp_month && paymentMethod?.card?.exp_year
+            ? `${String(paymentMethod.card.exp_month).padStart(2, '0')}/${paymentMethod.card.exp_year}`
+            : undefined,
+          billing_details: paymentMethod?.billing_details || null
+        })
+        .eq('payment_method_id', methodId)
+        .eq('user_id', user.id);
+
+      if (updateError) {
+        console.error('Error updating payment method:', updateError);
+        Alert.alert('Error', 'Payment method was updated but failed to save to database');
+        return;
+      }
+
+      console.log('Payment method updated successfully');
+      Alert.alert('Success', 'Card updated successfully');
+      await fetchPaymentMethods();
+    } catch (error) {
+      console.error('Error updating payment method:', error);
+      Alert.alert('Error', error.message || 'Failed to update payment method');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const renderPaymentMethodIcon = (type: string) => {
     switch (type) {
@@ -46,89 +428,114 @@ const PaymentMethodsScreen = ({ navigation }) => {
     }
   };
 
-  const PaymentMethodItem = ({ method }: { method: PaymentMethod }) => (
-    <TouchableOpacity style={styles.methodItem}>
+  const PaymentMethodItem = ({ method }: { method: PaymentMethod }) => {
+    console.log('Rendering payment method:', method);
+    return (
+    <TouchableOpacity 
+      style={styles.methodItem}
+      onPress={() => {
+        Alert.alert(
+          'Payment Method Options',
+          'What would you like to do?',
+          [
+            {
+              text: 'Edit Card',
+              onPress: () => handleEditCard(method.id),
+              style: 'default',
+            },
+            {
+              text: 'Set as Default',
+              onPress: () => handleSetDefault(method.id),
+              style: 'default',
+            },
+            {
+              text: 'Remove',
+              onPress: () => handleDeletePaymentMethod(method.id),
+              style: 'destructive',
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel',
+            },
+          ],
+        );
+      }}
+    >
       <View style={styles.methodLeft}>
         <View style={styles.iconContainer}>
           {renderPaymentMethodIcon(method.type)}
         </View>
         <View style={styles.methodInfo}>
-          <Text style={styles.methodTitle}>
-            {method.type === 'stripe' ? '•••• ' + method.last4 : method.last4}
-          </Text>
+          <Typography variant="body1" style={styles.methodTitle}>
+            {method.type === 'card' ? '•••• ' + method.last4 : method.last4}
+          </Typography>
           {method.expiryDate && (
-            <Text style={styles.methodExpiry}>Expires {method.expiryDate}</Text>
+            <Typography variant="body2" style={styles.methodExpiry}>
+              Expires {method.expiryDate}
+            </Typography>
           )}
         </View>
       </View>
       <View style={styles.methodRight}>
         {method.isDefault && (
           <View style={styles.defaultBadge}>
-            <Text style={styles.defaultText}>Default</Text>
+            <Typography variant="caption" style={styles.defaultText}>
+              Default
+            </Typography>
           </View>
         )}
         <Ionicons name="ellipsis-vertical" size={20} color="#666" />
       </View>
     </TouchableOpacity>
-  );
+  )};
 
   return (
-    <BaseSettingsScreen title="Payment Methods" navigation={navigation}>
+    <BaseSettingsScreen 
+      title="Payment Methods"
+      isLoading={isLoading}
+    >
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Payment Methods</Text>
+          <Typography variant="h2" style={styles.sectionTitle}>
+            Your Payment Methods
+          </Typography>
           <View style={styles.card}>
-            {paymentMethods.map((method) => (
-              <PaymentMethodItem key={method.id} method={method} />
-            ))}
+            {paymentMethods.length > 0 ? (
+              <>
+                {console.log('Rendering payment methods:', paymentMethods)}
+                {paymentMethods.map((method) => (
+                  <PaymentMethodItem key={method.id} method={method} />
+                ))}
+              </>
+            ) : (
+              <View style={styles.emptyState}>
+                <Typography variant="body1" style={styles.emptyStateText}>
+                  No payment methods added yet
+                </Typography>
+              </View>
+            )}
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Add Payment Method</Text>
+          <Typography variant="h2" style={styles.sectionTitle}>
+            Add Payment Method
+          </Typography>
           <View style={styles.addMethodsCard}>
-            <TouchableOpacity style={styles.addMethodButton}>
+            <TouchableOpacity 
+              style={styles.addMethodButton}
+              onPress={handleAddCard}
+            >
               <View style={styles.addMethodIcon}>
                 <Ionicons name="card-outline" size={24} color="#FF5722" />
               </View>
               <View style={styles.addMethodInfo}>
-                <Text style={styles.addMethodTitle}>Add Credit Card</Text>
-                <Text style={styles.addMethodDescription}>
+                <Typography variant="body1" style={styles.addMethodTitle}>
+                  Add Credit Card
+                </Typography>
+                <Typography variant="body2" style={styles.addMethodDescription}>
                   Add a credit or debit card
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#FF5722" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.addMethodButton}>
-              <View style={styles.addMethodIcon}>
-                <Ionicons name="logo-paypal" size={24} color="#FF5722" />
-              </View>
-              <View style={styles.addMethodInfo}>
-                <Text style={styles.addMethodTitle}>Connect PayPal</Text>
-                <Text style={styles.addMethodDescription}>
-                  Link your PayPal account
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#FF5722" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Payment Settings</Text>
-          <View style={styles.card}>
-            <TouchableOpacity style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingTitle}>Currency</Text>
-                <Text style={styles.settingValue}>GBP (£)</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#FF5722" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingTitle}>Billing Address</Text>
-                <Text style={styles.settingValue}>Add address</Text>
+                </Typography>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#FF5722" />
             </TouchableOpacity>
@@ -142,13 +549,12 @@ const PaymentMethodsScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    padding: 16,
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
     color: '#666',
     marginBottom: 12,
     marginLeft: 4,
@@ -188,12 +594,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   methodTitle: {
-    fontSize: 16,
-    fontWeight: '500',
     color: '#1a1a1a',
   },
   methodExpiry: {
-    fontSize: 14,
     color: '#666',
     marginTop: 2,
   },
@@ -209,9 +612,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   defaultText: {
-    fontSize: 12,
     color: '#FF5722',
-    fontWeight: '500',
   },
   addMethodsCard: {
     backgroundColor: '#fff',
@@ -243,12 +644,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   addMethodTitle: {
-    fontSize: 16,
-    fontWeight: '500',
     color: '#1a1a1a',
   },
   addMethodDescription: {
-    fontSize: 14,
     color: '#666',
     marginTop: 2,
   },
@@ -264,15 +662,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingTitle: {
-    fontSize: 16,
-    fontWeight: '500',
     color: '#1a1a1a',
   },
   settingValue: {
-    fontSize: 14,
     color: '#666',
     marginTop: 2,
   },
+  emptyState: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    color: '#666',
+  },
 });
-
-export { PaymentMethodsScreen };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,26 +6,135 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
+  Platform,
+  Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { BusinessNavigationBar } from '../components/BusinessNavigationBar';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { BusinessTopBar } from '../components/BusinessTopBar';
 import { LinearGradient } from 'expo-linear-gradient';
+import { supabase } from '../supabase/client';
+import { useAuth } from '../contexts/AuthContext';
+import { db } from '../supabase/client';
+
+// Define the navigation param list type
+type RootStackParamList = {
+  BusinessBookings: undefined;
+  BusinessHours: undefined;
+  ProfessionalProfile: undefined;
+  DepositSettings: undefined;
+  // Add other screen names as needed
+};
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const HomeScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
+  const { user } = useAuth();
+  const [metrics, setMetrics] = useState({
+    bookingsToday: 0,
+    revenueToday: 0,
+    totalClients: 0,
+  });
+  const [businessId, setBusinessId] = useState<string | null>(null);
 
-  const renderMetricCard = (title: string, value: string, icon: string) => (
+  // First fetch the business ID for the current user
+  useEffect(() => {
+    const fetchBusinessId = async () => {
+      if (!user) return;
+
+      try {
+        const { data: business, error } = await db.businesses.getByOwner(user.id);
+        if (error) throw error;
+        
+        if (business && business.length > 0) {
+          setBusinessId(business[0].id);
+        }
+      } catch (error) {
+        console.error('Error fetching business:', error);
+        Alert.alert('Error', 'Failed to load business information');
+      }
+    };
+
+    fetchBusinessId();
+  }, [user]);
+
+  // Then fetch metrics using the business ID
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      if (!businessId) return;
+
+      try {
+        // Get today's start and end timestamps
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        // Fetch today's bookings
+        const { data: todayBookings, error: bookingsError } = await supabase
+          .from('bookings')
+          .select(`
+            id,
+            service_id,
+            services (
+              id,
+              price
+            )
+          `)
+          .eq('business_id', businessId)
+          .gte('start_time', today.toISOString())
+          .lt('start_time', tomorrow.toISOString());
+
+        if (bookingsError) throw bookingsError;
+
+        // Calculate metrics
+        const bookingsToday = todayBookings?.length || 0;
+        const revenueToday = todayBookings?.reduce((sum, booking) => {
+          const servicePrice = (booking.services as any)?.price || 0;
+          return sum + servicePrice;
+        }, 0) || 0;
+
+        // Fetch total unique clients
+        const { count: totalClients, error: clientsError } = await supabase
+          .from('bookings')
+          .select('customer_id', { count: 'exact', head: true })
+          .eq('business_id', businessId)
+          .not('customer_id', 'is', null);
+
+        if (clientsError) throw clientsError;
+
+        setMetrics({
+          bookingsToday,
+          revenueToday,
+          totalClients: totalClients || 0,
+        });
+      } catch (error) {
+        console.error('Error fetching metrics:', error);
+        Alert.alert('Error', 'Failed to load metrics. Please try again.');
+      }
+    };
+
+    if (businessId) {
+      fetchMetrics();
+    }
+  }, [businessId]);
+
+  const renderMetricCard = (title: string, value: string, icon: keyof typeof MaterialCommunityIcons.glyphMap) => (
     <View style={styles.metricCard}>
-      <MaterialCommunityIcons name={icon as any} size={24} color="#FF5722" />
+      <MaterialCommunityIcons name={icon} size={24} color="#FF5722" />
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricTitle}>{title}</Text>
     </View>
   );
 
-  const renderActionCard = (icon: string, title: string, onPress: () => void) => (
+  const renderActionCard = (
+    icon: keyof typeof MaterialCommunityIcons.glyphMap,
+    title: string,
+    onPress: () => void
+  ) => (
     <TouchableOpacity style={styles.actionCard} onPress={onPress}>
       <MaterialCommunityIcons name={icon} size={24} color="#FF5722" />
       <Text style={styles.actionText}>{title}</Text>
@@ -40,9 +149,9 @@ export const HomeScreen = () => {
         <View style={styles.container}>
           {/* Metrics Section */}
           <View style={styles.metricsContainer}>
-            {renderMetricCard('Today\'s Bookings', '8', 'calendar-today')}
-            {renderMetricCard('Revenue', '$450', 'cash')}
-            {renderMetricCard('New Clients', '3', 'account-plus')}
+            {renderMetricCard('Bookings Today', metrics.bookingsToday.toString(), 'calendar-today')}
+            {renderMetricCard('Revenue Made Today', `£${metrics.revenueToday.toFixed(2)}`, 'cash')}
+            {renderMetricCard('Total Clients', metrics.totalClients.toString(), 'account-plus')}
           </View>
 
           {/* Quick Actions */}
@@ -50,9 +159,9 @@ export const HomeScreen = () => {
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.actionsGrid}>
               {renderActionCard('calendar-plus', 'New Booking', () => navigation.navigate('BusinessBookings'))}
-              {renderActionCard('account-multiple', 'Clients', () => navigation.navigate('Clients'))}
-              {renderActionCard('chart-bar', 'Analytics', () => navigation.navigate('BusinessAnalytics'))}
-              {renderActionCard('cog', 'Settings', () => navigation.navigate('BusinessSettings'))}
+              {renderActionCard('clock', 'Edit Business Hours', () => navigation.navigate('BusinessHours'))}
+              {renderActionCard('tag-multiple', 'Edit Services & Pricing', () => navigation.navigate('ProfessionalProfile'))}
+              {renderActionCard('cash', 'Edit Deposit Settings', () => navigation.navigate('DepositSettings'))}
             </View>
           </View>
 
@@ -95,7 +204,6 @@ export const HomeScreen = () => {
           </View>
         </View>
       </ScrollView>
-      <BusinessNavigationBar />
     </SafeAreaView>
   );
 };
@@ -111,6 +219,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 140 : 120,
   },
   section: {
     marginBottom: 24,
@@ -126,6 +235,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     marginHorizontal: 4,
     elevation: 2,
     shadowColor: '#000',
@@ -138,10 +248,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginVertical: 8,
     color: '#1A1A1A',
+    textAlign: 'center',
   },
   metricTitle: {
     fontSize: 12,
     color: '#666666',
+    textAlign: 'center',
+    paddingHorizontal: 4,
   },
   sectionTitle: {
     fontSize: 18,

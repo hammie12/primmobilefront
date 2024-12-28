@@ -1,31 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Image,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { CustomerNavigationBar } from '../../components/CustomerNavigationBar';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Typography } from '../../components/Typography';
+import { BaseScreen } from '../../components/BaseScreen';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 88 : 64;
 
 export const ServiceDetailsScreen = ({ route }) => {
   const navigation = useNavigation();
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const { 
     professionalId,
     serviceName,
     servicePrice,
     serviceDuration,
     professionalName,
-    category
+    category,
+    description
   } = route.params;
 
   // Sample service images (replace with actual service images)
@@ -35,98 +38,131 @@ export const ServiceDetailsScreen = ({ route }) => {
     'https://example.com/service3.jpg',
   ];
 
-  const serviceDescription = 'Experience our premium service delivered by skilled professionals. ' +
+  const serviceDescription = description || 'Experience our premium service delivered by skilled professionals. ' +
     'We use top-quality products and the latest techniques to ensure you get the best results. ' +
     'Our experienced team will work with you to achieve your desired look.';
 
   const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity 
-        style={styles.backButton}
+        style={styles.headerButton}
         onPress={() => navigation.goBack()}
       >
-        <MaterialCommunityIcons name="arrow-left" size={24} color="#FFF" />
+        <MaterialCommunityIcons name="arrow-left" size={24} color="#333" />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>{serviceName}</Text>
+      <Typography variant="h3" style={styles.headerTitle}>{serviceName}</Typography>
+      <View style={styles.headerButton} />
     </View>
   );
 
   const renderImageGallery = () => (
-    <ScrollView 
-      horizontal 
-      pagingEnabled 
-      showsHorizontalScrollIndicator={false}
-      style={styles.imageGallery}
-    >
-      {serviceImages.map((image, index) => (
-        <View key={index} style={styles.imageContainer}>
-          <LinearGradient
-            colors={['#FF5722', '#FF8A65']}
-            style={styles.imagePlaceholder}
-          >
-            <MaterialCommunityIcons 
-              name={category === 'Hair' ? 'content-cut' : 
-                    category === 'Nails' ? 'hand-back-right-outline' : 'eye'}
-              size={48} 
-              color="#FFF" 
+    <View style={styles.imageContainer}>
+      <ScrollView 
+        horizontal 
+        pagingEnabled 
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(e) => {
+          const newIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+          setActiveImageIndex(newIndex);
+        }}
+      >
+        {serviceImages.map((image, index) => (
+          <View key={index} style={styles.imageWrapper}>
+            <LinearGradient
+              colors={['#FF5722', '#FF8A65']}
+              style={styles.imagePlaceholder}
+            >
+              <MaterialCommunityIcons 
+                name={category === 'HAIR' ? 'content-cut' : 
+                      category === 'NAILS' ? 'hand-back-right-outline' : 'eye'}
+                size={64} 
+                color="#FFF" 
+              />
+            </LinearGradient>
+          </View>
+        ))}
+      </ScrollView>
+      {serviceImages.length > 1 && (
+        <View style={styles.paginationDots}>
+          {serviceImages.map((_, index) => (
+            <View
+              key={index}
+              style={[
+                styles.paginationDot,
+                index === activeImageIndex && styles.paginationDotActive
+              ]}
             />
-          </LinearGradient>
+          ))}
         </View>
-      ))}
-    </ScrollView>
-  );
-
-  const renderServiceDetails = () => (
-    <View style={styles.detailsContainer}>
-      <View style={styles.serviceHeader}>
-        <Text style={styles.serviceName}>{serviceName}</Text>
-        <Text style={styles.professionalName}>by {professionalName}</Text>
-      </View>
-
-      <View style={styles.serviceInfo}>
-        <View style={styles.infoItem}>
-          <MaterialCommunityIcons name="cash" size={24} color="#FF5722" />
-          <Text style={styles.infoText}>{servicePrice}</Text>
-        </View>
-        <View style={styles.infoItem}>
-          <MaterialCommunityIcons name="clock-outline" size={24} color="#FF5722" />
-          <Text style={styles.infoText}>{serviceDuration}</Text>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Description</Text>
-        <Text style={styles.description}>{serviceDescription}</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>What's Included</Text>
-        <View style={styles.includedItems}>
-          <View style={styles.includedItem}>
-            <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-            <Text style={styles.includedText}>Professional consultation</Text>
-          </View>
-          <View style={styles.includedItem}>
-            <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-            <Text style={styles.includedText}>Premium products used</Text>
-          </View>
-          <View style={styles.includedItem}>
-            <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
-            <Text style={styles.includedText}>Aftercare advice</Text>
-          </View>
-        </View>
-      </View>
+      )}
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
+    <BaseScreen>
+      <StatusBar style="dark" />
       {renderHeader()}
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.container} bounces={false}>
         {renderImageGallery()}
-        {renderServiceDetails()}
+        
+        <View style={styles.content}>
+          {/* Professional Info */}
+          <View style={styles.profileHeader}>
+            <View style={styles.profileInfo}>
+              <Typography variant="h2" style={styles.serviceName}>{serviceName}</Typography>
+              <Typography variant="body2" style={styles.professionalName}>by {professionalName}</Typography>
+            </View>
+          </View>
+
+          {/* Quick Info */}
+          <View style={styles.quickInfo}>
+            <View style={styles.infoItem}>
+              <MaterialCommunityIcons name="clock-outline" size={20} color="#FF5722" />
+              <Typography variant="body2" style={styles.infoText}>{serviceDuration} mins</Typography>
+            </View>
+            <View style={styles.infoItem}>
+              <MaterialCommunityIcons name="cash" size={20} color="#FF5722" />
+              <Typography variant="body2" style={styles.infoText}>£{servicePrice}</Typography>
+            </View>
+            <View style={styles.infoItem}>
+              <MaterialCommunityIcons 
+                name={category === 'HAIR' ? 'content-cut' : 
+                      category === 'NAILS' ? 'hand-back-right-outline' : 'eye'}
+                size={20} 
+                color="#FF5722" 
+              />
+              <Typography variant="body2" style={styles.infoText}>{category}</Typography>
+            </View>
+          </View>
+
+          {/* Description */}
+          <View style={styles.section}>
+            <Typography variant="h3" style={styles.sectionTitle}>About this service</Typography>
+            <Typography variant="body2" style={styles.description}>{serviceDescription}</Typography>
+          </View>
+
+          {/* What's Included */}
+          <View style={styles.section}>
+            <Typography variant="h3" style={styles.sectionTitle}>What's included</Typography>
+            <View style={styles.includedItems}>
+              <View style={styles.includedItem}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                <Typography variant="body2" style={styles.includedText}>Professional consultation</Typography>
+              </View>
+              <View style={styles.includedItem}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                <Typography variant="body2" style={styles.includedText}>Premium products</Typography>
+              </View>
+              <View style={styles.includedItem}>
+                <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                <Typography variant="body2" style={styles.includedText}>Aftercare advice</Typography>
+              </View>
+            </View>
+          </View>
+        </View>
       </ScrollView>
+
+      {/* Book Now Button */}
       <View style={styles.footer}>
         <TouchableOpacity 
           style={styles.bookButton}
@@ -138,11 +174,10 @@ export const ServiceDetailsScreen = ({ route }) => {
             professionalName
           })}
         >
-          <Text style={styles.bookButtonText}>Book Now</Text>
+          <Typography variant="button" style={styles.bookButtonText}>Book Now</Typography>
         </TouchableOpacity>
       </View>
-      <CustomerNavigationBar />
-    </SafeAreaView>
+    </BaseScreen>
   );
 };
 
@@ -152,80 +187,97 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   header: {
-    height: 60,
-    backgroundColor: '#FF5722',
+    height: HEADER_HEIGHT,
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
     paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
   },
-  backButton: {
-    padding: 8,
+  headerButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '600',
-    marginLeft: 16,
-  },
-  content: {
+    color: '#333333',
     flex: 1,
-  },
-  imageGallery: {
-    height: 300,
+    textAlign: 'center',
   },
   imageContainer: {
+    height: SCREEN_WIDTH,
+    backgroundColor: '#F5F5F5',
+  },
+  imageWrapper: {
     width: SCREEN_WIDTH,
-    height: 300,
+    height: SCREEN_WIDTH,
   },
   imagePlaceholder: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  detailsContainer: {
+  paginationDots: {
+    flexDirection: 'row',
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    gap: 8,
+  },
+  paginationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  paginationDotActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  content: {
     padding: 16,
   },
-  serviceHeader: {
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 16,
   },
+  profileInfo: {
+    flex: 1,
+  },
   serviceName: {
-    fontSize: 24,
-    fontWeight: 'bold',
     color: '#333333',
   },
   professionalName: {
-    fontSize: 16,
     color: '#666666',
     marginTop: 4,
   },
-  serviceInfo: {
+  quickInfo: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
     padding: 16,
     marginBottom: 24,
   },
   infoItem: {
     alignItems: 'center',
+    gap: 4,
   },
   infoText: {
-    fontSize: 16,
     color: '#333333',
-    marginTop: 4,
-    fontWeight: '600',
   },
   section: {
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
     color: '#333333',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   description: {
-    fontSize: 14,
     color: '#666666',
     lineHeight: 22,
   },
@@ -238,23 +290,21 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   includedText: {
-    fontSize: 14,
     color: '#333333',
   },
   footer: {
-    padding: 16,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#EEEEEE',
+    padding: 16,
   },
   bookButton: {
     backgroundColor: '#FF5722',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     alignItems: 'center',
   },
   bookButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

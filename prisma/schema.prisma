@@ -1,0 +1,327 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  PROFESSIONAL
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  PAYPAL
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum TransactionType {
+  PAYMENT
+  REFUND
+  EARNING
+  WITHDRAWAL
+}
+
+enum ServiceCategory {
+  HAIR
+  MAKEUP
+  NAILS
+  MASSAGE
+  SKINCARE
+  FITNESS
+  OTHER
+}
+
+// User Management
+model User {
+  id                String              @id @default(uuid())
+  email             String              @unique
+  password          String
+  role              UserRole
+  status            UserStatus          @default(ACTIVE)
+  customerProfile   CustomerProfile?
+  professionalProfile ProfessionalProfile?
+  notifications     Notification[]
+  transactions      Transaction[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@map("users")
+}
+
+model CustomerProfile {
+  id               String       @id @default(uuid())
+  userId           String       @unique
+  user             User         @relation(fields: [userId], references: [id])
+  firstName        String
+  lastName         String
+  phoneNumber      String?
+  address          Address?
+  bookings         Booking[]
+  rewardsProfile   RewardsProfile?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@map("customer_profiles")
+}
+
+model ProfessionalProfile {
+  id               String       @id @default(uuid())
+  userId           String       @unique
+  user             User         @relation(fields: [userId], references: [id])
+  businessName     String
+  description      String?
+  services         Service[]
+  bookings         Booking[]
+  portfolio        Portfolio?
+  schedule         Schedule?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@map("professional_profiles")
+}
+
+model Address {
+  id               String          @id @default(uuid())
+  customerProfileId String         @unique
+  customerProfile  CustomerProfile @relation(fields: [customerProfileId], references: [id])
+  street           String
+  city             String
+  state            String
+  postalCode       String
+  country          String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@map("addresses")
+}
+
+// Service Management
+model Service {
+  id               String            @id @default(uuid())
+  professionalId   String
+  professional     ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  name             String
+  description      String
+  duration         Int               // in minutes
+  price            Float
+  category         ServiceCategory
+  images           ServiceImage[]
+  bookings         Booking[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("services")
+}
+
+model ServiceImage {
+  id               String    @id @default(uuid())
+  serviceId        String
+  service          Service   @relation(fields: [serviceId], references: [id])
+  url              String
+  thumbnailUrl     String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("service_images")
+}
+
+// Portfolio Management
+model Portfolio {
+  id               String            @id @default(uuid())
+  professionalId   String            @unique
+  professional     ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  description      String?
+  images           PortfolioImage[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("portfolios")
+}
+
+model PortfolioImage {
+  id               String    @id @default(uuid())
+  portfolioId      String
+  portfolio        Portfolio @relation(fields: [portfolioId], references: [id])
+  url              String
+  thumbnailUrl     String
+  description      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("portfolio_images")
+}
+
+// Booking Management
+model Booking {
+  id               String        @id @default(uuid())
+  customerId       String
+  customer         CustomerProfile @relation(fields: [customerId], references: [id])
+  professionalId   String
+  professional     ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  serviceId        String
+  service          Service       @relation(fields: [serviceId], references: [id])
+  startTime        DateTime
+  endTime          DateTime
+  status           BookingStatus @default(PENDING)
+  notes            String?
+  payment          Payment?
+  rating           Rating?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@map("bookings")
+}
+
+// Schedule Management
+model Schedule {
+  id               String            @id @default(uuid())
+  professionalId   String            @unique
+  professional     ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  workingHours     WorkingHours[]
+  breaks           Break[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@map("schedules")
+}
+
+model WorkingHours {
+  id               String    @id @default(uuid())
+  scheduleId       String
+  schedule         Schedule  @relation(fields: [scheduleId], references: [id])
+  dayOfWeek        Int      // 0-6 (Sunday-Saturday)
+  startTime        String   // HH:mm format
+  endTime          String   // HH:mm format
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("working_hours")
+}
+
+model Break {
+  id               String    @id @default(uuid())
+  scheduleId       String
+  schedule         Schedule  @relation(fields: [scheduleId], references: [id])
+  startTime        DateTime
+  endTime          DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("breaks")
+}
+
+// Payment Management
+model Payment {
+  id               String        @id @default(uuid())
+  bookingId        String        @unique
+  booking          Booking       @relation(fields: [bookingId], references: [id])
+  amount           Float
+  paymentMethod    PaymentMethod
+  status           PaymentStatus @default(PENDING)
+  transactionId    String        @unique
+  refund           Refund?
+  transactions     Transaction[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@map("payments")
+}
+
+model Refund {
+  id               String        @id @default(uuid())
+  paymentId        String        @unique
+  payment          Payment       @relation(fields: [paymentId], references: [id])
+  amount           Float
+  reason           String
+  status           PaymentStatus
+  transactions     Transaction[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@map("refunds")
+}
+
+model Transaction {
+  id               String          @id @default(uuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id])
+  amount           Float
+  type             TransactionType
+  description      String
+  paymentId        String?
+  payment          Payment?        @relation(fields: [paymentId], references: [id])
+  refundId         String?
+  refund           Refund?         @relation(fields: [refundId], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@map("transactions")
+}
+
+// Rewards Management
+model RewardsProfile {
+  id               String          @id @default(uuid())
+  customerProfileId String         @unique
+  customerProfile  CustomerProfile @relation(fields: [customerProfileId], references: [id])
+  points           Int            @default(0)
+  tier             String         @default("BRONZE")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@map("rewards_profiles")
+}
+
+// Rating and Review Management
+model Rating {
+  id               String    @id @default(uuid())
+  bookingId        String    @unique
+  booking          Booking   @relation(fields: [bookingId], references: [id])
+  rating           Int       // 1-5
+  review           String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("ratings")
+}
+
+// Notification Management
+model Notification {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  title            String
+  message          String
+  isRead           Boolean   @default(false)
+  type             String    // e.g., "BOOKING", "PAYMENT", "SYSTEM"
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("notifications")
+}

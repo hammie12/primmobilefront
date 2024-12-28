@@ -2,18 +2,46 @@ import React from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useAuth } from '../contexts/AuthContext';
+
+type RootStackParamList = {
+  Home: undefined;
+  CustomerHome: undefined;
+  BusinessBookings: undefined;
+  CustomerBookings: undefined;
+  BusinessAnalytics: undefined;
+  CustomerRewards: undefined;
+  ProfessionalProfile: undefined;
+  CustomerProfile: undefined;
+  BusinessSettings: undefined;
+  CustomerSettings: undefined;
+};
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const BottomNavigationBar = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
   const route = useRoute();
+  const { userRole } = useAuth();
 
-  const tabs = [
-    { name: 'Home', icon: 'home', route: 'Business' },
+  const customerTabs = [
+    { name: 'Home', icon: 'home', route: 'CustomerHome' },
+    { name: 'Bookings', icon: 'calendar', route: 'CustomerBookings' },
+    { name: 'Rewards', icon: 'gift', route: 'CustomerRewards' },
+    { name: 'Profile', icon: 'person', route: 'CustomerProfile' },
+    { name: 'Settings', icon: 'settings', route: 'CustomerSettings' },
+  ] as const;
+
+  const professionalTabs = [
+    { name: 'Home', icon: 'home', route: 'Home' },
     { name: 'Bookings', icon: 'calendar', route: 'BusinessBookings' },
-    { name: 'Analytics', icon: 'bar-chart', route: 'BusinessAnalytics' },
+    { name: 'Analytics', icon: 'stats-chart', route: 'BusinessAnalytics' },
     { name: 'Profile', icon: 'person', route: 'ProfessionalProfile' },
     { name: 'Settings', icon: 'settings', route: 'BusinessSettings' },
-  ];
+  ] as const;
+
+  const tabs = userRole === 'CUSTOMER' ? customerTabs : professionalTabs;
 
   return (
     <View style={styles.container}>
@@ -23,7 +51,10 @@ const BottomNavigationBar = () => {
           <TouchableOpacity
             key={tab.name}
             style={styles.tab}
-            onPress={() => navigation.navigate(tab.route)}
+            onPress={() => {
+              console.log('[BottomNavigationBar] Navigating to:', tab.route);
+              navigation.navigate(tab.route);
+            }}
           >
             <Ionicons
               name={isActive ? tab.icon : `${tab.icon}-outline`}

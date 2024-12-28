@@ -7,113 +7,266 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import { useAuth } from '../contexts/AuthContext';
+import { UserRole } from '../types/user';
+import { supabase } from '../lib/supabase';
 
 const SignUpScreen = () => {
   const navigation = useNavigation();
+  const { signUp } = useAuth();
   const [formData, setFormData] = useState({
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     phone: '',
     password: '',
     confirmPassword: '',
+    role: 'CUSTOMER' as UserRole,
+    businessName: '',
   });
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleChange = (field: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const validateForm = () => {
+    if (formData.password !== formData.confirmPassword) {
+      Alert.alert('Error', 'Passwords do not match');
+      return false;
+    }
+
+    if (formData.role === 'PROFESSIONAL' && !formData.businessName) {
+      Alert.alert('Error', 'Business name is required for professionals');
+      return false;
+    }
+
+    // Email validation for development
+    if (!formData.email.includes('@')) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSignUp = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    console.log('[SignUpScreen] Starting signup with role:', formData.role);
+
+    setIsLoading(true);
+    // For development, automatically format test emails
+    let email = formData.email;
+    if (__DEV__ && !email.includes('@supabase.co')) {
+      // Convert any test email to the correct format
+      const localPart = email.split('@')[0];
+      email = `test+${localPart}@supabase.co`;
+    }
+
+    const { error } = await signUp({
+      email,
+      password: formData.password,
+      role: formData.role,
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      businessName: formData.role === 'PROFESSIONAL' ? formData.businessName : undefined,
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      console.log('[SignUpScreen] Signup error:', error);
+      if (error.message?.includes('email_address_invalid')) {
+        Alert.alert(
+          'Invalid Email',
+          'For testing, please use an email in the format: test+yourname@supabase.co'
+        );
+      } else if (error.message?.includes('over_email_send_rate_limit')) {
+        Alert.alert(
+          'Too Many Attempts',
+          'Please wait a few minutes before trying to sign up again.'
+        );
+      } else {
+        Alert.alert('Error', error.message || 'Failed to create account');
+      }
+      return;
+    }
+
+    console.log('[SignUpScreen] Signup successful');
+
+    Alert.alert(
+      'Success',
+      'Account created successfully!',
+      [
+        {
+          text: 'OK',
+          onPress: async () => {
+            // Get the current session to check the role
+            const { data: { session } } = await supabase.auth.getSession();
+            const userRole = session?.user?.user_metadata?.role;
+            
+            console.log('[SignUpScreen] Current form role:', formData.role);
+            console.log('[SignUpScreen] Session metadata:', session?.user?.user_metadata);
+            console.log('[SignUpScreen] Navigating with role:', userRole);
+            
+            // Use formData.role as a fallback if metadata isn't available yet
+            const finalRole = userRole || formData.role;
+            console.log('[SignUpScreen] Final role used:', finalRole);
+            
+            if (finalRole === 'CUSTOMER') {
+              console.log('[SignUpScreen] Navigating to CustomerTabs');
+              navigation.replace('CustomerTabs');
+            } else {
+              console.log('[SignUpScreen] Navigating to Home');
+              navigation.replace('Home');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
       <LinearGradient
-        colors={['#FFEFEA', '#FFFFFF']}
+        colors={['#FFEFEA', '#FFFBF9']}
         style={styles.container}
       >
+        <StatusBar style="dark" />
         <ScrollView 
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.contentContainer}>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Join our professional community</Text>
+          <View style={styles.content}>
+            <View style={styles.logoContainer}>
+              <Text style={styles.logo}>Prim</Text>
+              <Text style={styles.tagline}>Create your account</Text>
+            </View>
 
             <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Full Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.fullName}
-                  onChangeText={(value) => handleChange('fullName', value)}
-                  placeholder="Enter your full name"
-                  autoCapitalize="words"
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.email}
-                  onChangeText={(value) => handleChange('email', value)}
-                  placeholder="Enter your email"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Phone Number</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone}
-                  onChangeText={(value) => handleChange('phone', value)}
-                  placeholder="Enter your phone number"
-                  keyboardType="phone-pad"
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Password</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.password}
-                  onChangeText={(value) => handleChange('password', value)}
-                  placeholder="Create a password"
-                  secureTextEntry
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.label}>Confirm Password</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.confirmPassword}
-                  onChangeText={(value) => handleChange('confirmPassword', value)}
-                  placeholder="Confirm your password"
-                  secureTextEntry
-                />
-              </View>
-
-              <TouchableOpacity 
-                style={styles.button}
-                onPress={() => navigation.navigate('Home')}
-              >
-                <Text style={styles.buttonText}>Create Account</Text>
-              </TouchableOpacity>
-
-              <View style={styles.signinContainer}>
-                <Text style={styles.signinText}>Already have an account? </Text>
-                <TouchableOpacity onPress={() => navigation.navigate('SignIn')}>
-                  <Text style={styles.signinLink}>Sign In</Text>
+              <View style={styles.roleSelector}>
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    formData.role === 'CUSTOMER' && styles.roleButtonActive,
+                  ]}
+                  onPress={() => {
+                    console.log('[SignUpScreen] Setting role to CUSTOMER');
+                    setFormData({ ...formData, role: 'CUSTOMER' });
+                  }}
+                >
+                  <Text style={[
+                    styles.roleButtonText,
+                    formData.role === 'CUSTOMER' && styles.roleButtonTextActive
+                  ]}>Customer</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    formData.role === 'PROFESSIONAL' && styles.roleButtonActive,
+                  ]}
+                  onPress={() => {
+                    console.log('[SignUpScreen] Setting role to PROFESSIONAL');
+                    setFormData({ ...formData, role: 'PROFESSIONAL' });
+                  }}
+                >
+                  <Text style={[
+                    styles.roleButtonText,
+                    formData.role === 'PROFESSIONAL' && styles.roleButtonTextActive
+                  ]}>Professional</Text>
                 </TouchableOpacity>
               </View>
+
+              <TextInput
+                style={styles.input}
+                placeholder="First Name"
+                value={formData.firstName}
+                onChangeText={(text) => setFormData({ ...formData, firstName: text })}
+                placeholderTextColor="#666666"
+              />
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Last Name"
+                value={formData.lastName}
+                onChangeText={(text) => setFormData({ ...formData, lastName: text })}
+                placeholderTextColor="#666666"
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="Email"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={formData.email}
+                onChangeText={(text) => setFormData({ ...formData, email: text })}
+                placeholderTextColor="#666666"
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="Phone Number"
+                keyboardType="phone-pad"
+                value={formData.phone}
+                onChangeText={(text) => setFormData({ ...formData, phone: text })}
+                placeholderTextColor="#666666"
+              />
+
+              {formData.role === 'PROFESSIONAL' && (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Business Name"
+                  value={formData.businessName}
+                  onChangeText={(text) => setFormData({ ...formData, businessName: text })}
+                  placeholderTextColor="#666666"
+                />
+              )}
+
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                secureTextEntry
+                value={formData.password}
+                onChangeText={(text) => setFormData({ ...formData, password: text })}
+                placeholderTextColor="#666666"
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="Confirm Password"
+                secureTextEntry
+                value={formData.confirmPassword}
+                onChangeText={(text) => setFormData({ ...formData, confirmPassword: text })}
+                placeholderTextColor="#666666"
+              />
+
+              <TouchableOpacity
+                style={[styles.button, styles.primaryButton]}
+                onPress={handleSignUp}
+                disabled={isLoading}
+              >
+                <Text style={styles.primaryButtonText}>
+                  {isLoading ? 'Creating Account...' : 'Create Account'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.button, styles.outlineButton]}
+                onPress={() => navigation.navigate('SignIn')}
+              >
+                <Text style={styles.outlineButtonText}>Sign in to existing account</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </ScrollView>
@@ -132,68 +285,107 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  content: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'space-between',
+  },
   scrollContent: {
     flexGrow: 1,
   },
-  contentContainer: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'center',
+  logoContainer: {
+    alignItems: 'center',
+    marginTop: 60,
+    marginBottom: 40,
   },
-  title: {
-    fontSize: 32,
+  logo: {
+    fontSize: 48,
     fontWeight: 'bold',
-    color: '#1A1A1A',
-    marginBottom: 8,
+    color: '#FF5722',
+    marginBottom: 16,
   },
-  subtitle: {
+  tagline: {
     fontSize: 18,
     color: '#666666',
-    marginBottom: 32,
+    textAlign: 'center',
   },
   form: {
-    gap: 16,
+    width: '100%',
+    marginBottom: 40,
   },
-  inputContainer: {
-    gap: 8,
+  roleSelector: {
+    flexDirection: 'row',
+    marginBottom: 24,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
-  label: {
+  roleButton: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  roleButtonActive: {
+    backgroundColor: '#FF5722',
+  },
+  roleButtonText: {
     fontSize: 16,
-    color: '#1A1A1A',
-    fontWeight: '500',
+    color: '#666666',
+    fontWeight: '600',
+  },
+  roleButtonTextActive: {
+    color: '#FFFFFF',
   },
   input: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
     padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#EEEEEE',
+    borderColor: '#E0E0E0',
   },
   button: {
-    backgroundColor: '#FF5722',
-    borderRadius: 12,
+    width: '100%',
     padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
     alignItems: 'center',
-    marginTop: 8,
   },
-  buttonText: {
+  primaryButton: {
+    backgroundColor: '#FF5722',
+  },
+  primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
   },
-  signinContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 16,
+  outlineButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#666666',
   },
-  signinText: {
+  outlineButtonText: {
     color: '#666666',
-    fontSize: 14,
-  },
-  signinLink: {
-    color: '#FF5722',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E0E0E0',
+  },
+  dividerText: {
+    color: '#666666',
+    paddingHorizontal: 16,
+    fontSize: 14,
   },
 });

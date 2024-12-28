@@ -1,224 +1,153 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Dimensions, Modal } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  SafeAreaView,
+  Dimensions,
+  Modal,
+  Platform,
+  Image,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BusinessTopBar } from '../components/BusinessTopBar';
-import { BusinessNavigationBar } from '../components/BusinessNavigationBar';
+import { useNavigation } from '@react-navigation/native';
+import { Typography } from '../components/Typography';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { generateRandomColor } from '../utils/colors';
 
 type ViewMode = 'day' | 'week' | 'month';
 type Appointment = {
   id: string;
-  startTime: string;
-  endTime: string;
-  client: string;
-  service: string;
-  status: 'confirmed' | 'pending';
-  color: string;
+  start_time: string;
+  end_time: string;
+  customer_name: string;
+  service_name: string;
+  status: Database["public"]["Enums"]["booking_status"];
+  color?: string;
   date: string;
   price: number;
-  email: string;
-  phone: string;
+  customer_email: string;
+  customer_phone: string;
   notes?: string;
+  business_id: string;
 };
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const TIME_SLOTS = Array.from({ length: 13 }, (_, i) => `${i + 6}:00`);
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
-export const BusinessBookingsScreen: React.FC = () => {
+export const BusinessBookingsScreen = () => {
+  const navigation = useNavigation();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedMonthDay, setSelectedMonthDay] = useState<Date | null>(null);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const { user } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Sample appointments data with dates
-  const appointments: Appointment[] = [
-    // December 2024
-    {
-      id: '1',
-      startTime: '09:00',
-      endTime: '10:00',
-      client: 'Jane Smith',
-      service: 'Manicure',
-      status: 'confirmed',
-      color: '#1a3447',
-      date: '2024-12-16',
-      price: 28,
-      email: 'jane.smith@gmail.co.uk',
-      phone: '07700 900123',
-      notes: 'Regular customer, prefers gel polish'
-    },
-    {
-      id: '2',
-      startTime: '10:45',
-      endTime: '11:45',
-      client: 'Lisa Brown',
-      service: 'Beard Trim',
-      status: 'confirmed',
-      color: '#ffc107',
-      date: '2024-12-16',
-      price: 20,
-      email: 'lisa.brown@hotmail.co.uk',
-      phone: '07700 900234'
-    },
-    {
-      id: '3',
-      startTime: '13:00',
-      endTime: '14:30',
-      client: 'Emily Clark',
-      service: 'Facial',
-      status: 'confirmed',
-      color: '#8bc34a',
-      date: '2024-12-18',
-      price: 45,
-      email: 'emily.clark@btinternet.com',
-      phone: '07700 900345'
-    },
-    {
-      id: '4',
-      startTime: '15:00',
-      endTime: '16:00',
-      client: 'Sarah Wilson',
-      service: 'Massage',
-      status: 'pending',
-      color: '#9c27b0',
-      date: '2024-12-20',
-      price: 50,
-      email: 'sarah.wilson@yahoo.co.uk',
-      phone: '07700 900456'
-    },
-    {
-      id: '5',
-      startTime: '11:30',
-      endTime: '12:30',
-      client: 'Mike Johnson',
-      service: 'Haircut',
-      status: 'confirmed',
-      color: '#ff5722',
-      date: '2024-12-23',
-      price: 25,
-      email: 'mike.johnson@outlook.com',
-      phone: '07700 900567'
-    },
-    {
-      id: '6',
-      startTime: '14:00',
-      endTime: '15:00',
-      client: 'Emma Davis',
-      service: 'Waxing',
-      status: 'confirmed',
-      color: '#e91e63',
-      date: '2024-12-27',
-      price: 35,
-      email: 'emma.davis@gmail.co.uk',
-      phone: '07700 900678'
-    },
-    // January 2025
-    {
-      id: '7',
-      startTime: '10:00',
-      endTime: '11:00',
-      client: 'James Wilson',
-      service: 'Massage',
-      status: 'confirmed',
-      color: '#2196f3',
-      date: '2025-01-03',
-      price: 50,
-      email: 'james.wilson@btinternet.com',
-      phone: '07700 900789'
-    },
-    {
-      id: '8',
-      startTime: '12:00',
-      endTime: '13:30',
-      client: 'Sophie Lee',
-      service: 'Facial',
-      status: 'confirmed',
-      color: '#4caf50',
-      date: '2025-01-03',
-      price: 45,
-      email: 'sophie.lee@yahoo.co.uk',
-      phone: '07700 900890'
-    },
-    {
-      id: '9',
-      startTime: '09:30',
-      endTime: '10:30',
-      client: 'David Chen',
-      service: 'Haircut & Style',
-      status: 'pending',
-      color: '#ff9800',
-      date: '2025-01-06',
-      price: 35,
-      email: 'david.chen@gmail.co.uk',
-      phone: '07700 900901'
-    },
-    {
-      id: '10',
-      startTime: '11:00',
-      endTime: '12:30',
-      client: 'Rachel Green',
-      service: 'Manicure & Pedicure',
-      status: 'confirmed',
-      color: '#009688',
-      date: '2025-01-08',
-      price: 55,
-      email: 'rachel.green@hotmail.co.uk',
-      phone: '07700 901012'
-    },
-    {
-      id: '11',
-      startTime: '13:00',
-      endTime: '14:00',
-      client: 'Tom Parker',
-      service: 'Beard Trim & Styling',
-      status: 'confirmed',
-      color: '#795548',
-      date: '2025-01-10',
-      price: 30,
-      email: 'tom.parker@outlook.com',
-      phone: '07700 901123'
-    },
-    {
-      id: '12',
-      startTime: '15:00',
-      endTime: '16:00',
-      client: 'Linda Martinez',
-      service: 'Deep Tissue Massage',
-      status: 'pending',
-      color: '#607d8b',
-      date: '2025-01-13',
-      price: 65,
-      email: 'linda.martinez@gmail.co.uk',
-      phone: '07700 901234'
-    },
-    {
-      id: '13',
-      startTime: '10:00',
-      endTime: '12:00',
-      client: 'Alex Turner',
-      service: 'Hair Coloring',
-      status: 'confirmed',
-      color: '#3f51b5',
-      date: '2025-01-15',
-      price: 75,
-      email: 'alex.turner@btinternet.com',
-      phone: '07700 901345'
-    },
-    {
-      id: '14',
-      startTime: '13:00',
-      endTime: '16:00',
-      client: 'Julia White',
-      service: 'Spa Package',
-      status: 'confirmed',
-      color: '#673ab7',
-      date: '2025-01-17',
-      price: 120,
-      email: 'julia.white@yahoo.co.uk',
-      phone: '07700 901456'
-    }
-  ];
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      try {
+        setIsLoading(true);
+        
+        if (!user?.id) return;
+
+        // First get the professional profile
+        const { data: professionalData, error: professionalError } = await supabase
+          .from('professional_profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
+
+        if (professionalError) {
+          console.error('Error fetching professional profile:', professionalError);
+          setIsLoading(false);
+          return;
+        }
+
+        // Fetch bookings for this professional
+        const { data: bookings, error: bookingsError } = await supabase
+          .from('bookings')
+          .select(`
+            id,
+            start_time,
+            end_time,
+            status,
+            notes,
+            customer_id (
+              first_name,
+              last_name,
+              phone_number,
+              user_id (
+                email
+              )
+            ),
+            service_id (
+              name,
+              price
+            )
+          `)
+          .eq('professional_id', professionalData.id);
+
+        if (bookingsError) throw bookingsError;
+
+        // Transform bookings to match Appointment type with null checks
+        const formattedAppointments: Appointment[] = bookings
+          .filter(booking => booking.start_time && booking.end_time) // Filter out invalid bookings
+          .map(booking => {
+            // Default values for null cases
+            const customerName = booking.customer_id 
+              ? `${booking.customer_id.first_name || ''} ${booking.customer_id.last_name || ''}`.trim() 
+              : 'Unknown Customer';
+            
+            const serviceName = booking.service_id?.name || 'Unknown Service';
+            const servicePrice = booking.service_id?.price || 0;
+            
+            const customerEmail = booking.customer_id?.user_id?.email || '';
+            const customerPhone = booking.customer_id?.phone_number || '';
+
+            return {
+              id: booking.id,
+              start_time: new Date(booking.start_time).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+              end_time: new Date(booking.end_time).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              }),
+              customer_name: customerName,
+              service_name: serviceName,
+              status: booking.status || 'PENDING', // Default status
+              color: generateRandomColor(),
+              date: new Date(booking.start_time).toISOString().split('T')[0],
+              price: servicePrice,
+              customer_email: customerEmail,
+              customer_phone: customerPhone,
+              notes: booking.notes || '',
+              business_id: professionalData.id
+            };
+          });
+
+        setAppointments(formattedAppointments);
+      } catch (error) {
+        console.error('Error fetching appointments:', error);
+        // TODO: Show error toast or message to user
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, [user?.id]);
 
   const getWeekDates = (date: Date) => {
     const day = date.getDay();
@@ -269,9 +198,9 @@ export const BusinessBookingsScreen: React.FC = () => {
           style={[styles.viewModeButton, viewMode === mode && styles.viewModeButtonActive]}
           onPress={() => setViewMode(mode)}
         >
-          <Text style={[styles.viewModeText, viewMode === mode && styles.viewModeTextActive]}>
+          <Typography variant="button" style={[styles.viewModeText, viewMode === mode && styles.viewModeTextActive]}>
             {mode.charAt(0).toUpperCase() + mode.slice(1)}
-          </Text>
+          </Typography>
         </TouchableOpacity>
       ))}
     </View>
@@ -300,8 +229,7 @@ export const BusinessBookingsScreen: React.FC = () => {
   const renderAppointments = () => {
     const relevantAppointments = appointments.filter(appointment => {
       if (viewMode === 'day') {
-        const appointmentDate = new Date(appointment.date);
-        return appointmentDate.toISOString().split('T')[0] === selectedDate.toISOString().split('T')[0];
+        return appointment.date === selectedDate.toISOString().split('T')[0];
       } else if (viewMode === 'week') {
         const appointmentDate = new Date(appointment.date);
         const weekStart = weekDates[0];
@@ -317,10 +245,10 @@ export const BusinessBookingsScreen: React.FC = () => {
     });
 
     return relevantAppointments.map(appointment => {
-      const startHour = parseInt(appointment.startTime.split(':')[0]);
-      const startMinute = parseInt(appointment.startTime.split(':')[1]);
-      const endHour = parseInt(appointment.endTime.split(':')[0]);
-      const endMinute = parseInt(appointment.endTime.split(':')[1]);
+      const startHour = parseInt(appointment.start_time.split(':')[0]);
+      const startMinute = parseInt(appointment.start_time.split(':')[1]);
+      const endHour = parseInt(appointment.end_time.split(':')[0]);
+      const endMinute = parseInt(appointment.end_time.split(':')[1]);
       
       const top = ((startHour - 6) * 60 + startMinute);
       const height = ((endHour - startHour) * 60 + (endMinute - startMinute));
@@ -350,16 +278,16 @@ export const BusinessBookingsScreen: React.FC = () => {
           ]}
           onPress={() => handleAppointmentPress(appointment)}
         >
-          <Text style={styles.appointmentTime}>
-            {appointment.startTime} - {appointment.endTime}
-          </Text>
-          <Text style={styles.appointmentClient} numberOfLines={1}>
-            {appointment.client}
-          </Text>
-          <Text style={styles.appointmentService} numberOfLines={1}>
-            {appointment.service}
-          </Text>
-          <Text style={styles.appointmentPrice}>£{appointment.price}</Text>
+          <Typography variant="caption" style={styles.appointmentTime}>
+            {appointment.start_time} - {appointment.end_time}
+          </Typography>
+          <Typography variant="body1" style={styles.appointmentClient} numberOfLines={1}>
+            {appointment.customer_name}
+          </Typography>
+          <Typography variant="body2" style={styles.appointmentService} numberOfLines={1}>
+            {appointment.service_name}
+          </Typography>
+          <Typography variant="body1" style={styles.appointmentPrice}>£{appointment.price}</Typography>
         </TouchableOpacity>
       );
     });
@@ -377,7 +305,7 @@ export const BusinessBookingsScreen: React.FC = () => {
         <View style={styles.monthGrid}>
           {WEEKDAYS.map(day => (
             <View key={day} style={styles.monthDayHeader}>
-              <Text style={styles.monthDayHeaderText}>{day}</Text>
+              <Typography variant="body2" style={styles.monthDayHeaderText}>{day}</Typography>
             </View>
           ))}
           {daysInMonth.map((date, index) => {
@@ -397,12 +325,15 @@ export const BusinessBookingsScreen: React.FC = () => {
                 onPress={() => date && setSelectedMonthDay(date)}
               >
                 {date && (
-                  <Text style={[
-                    styles.monthDayText,
-                    (date.toDateString() === new Date().toDateString()) && styles.todayText
-                  ]}>
+                  <Typography 
+                    variant="body1" 
+                    style={[
+                      styles.monthDayText,
+                      (date.toDateString() === new Date().toDateString()) && styles.todayText
+                    ]}
+                  >
                     {date.getDate()}
-                  </Text>
+                  </Typography>
                 )}
               </TouchableOpacity>
             );
@@ -410,9 +341,9 @@ export const BusinessBookingsScreen: React.FC = () => {
         </View>
         {selectedMonthDay && (
           <ScrollView style={styles.selectedDayAppointments}>
-            <Text style={styles.selectedDayTitle}>
+            <Typography variant="h2" style={styles.selectedDayTitle}>
               Appointments for {selectedMonthDay.toLocaleDateString()}
-            </Text>
+            </Typography>
             <View style={styles.dayAppointmentsList}>
               {appointments
                 .filter(apt => new Date(apt.date).toDateString() === selectedMonthDay.toDateString())
@@ -424,12 +355,18 @@ export const BusinessBookingsScreen: React.FC = () => {
                   >
                     <View style={[styles.appointmentStatus, { backgroundColor: apt.color }]} />
                     <View style={styles.appointmentInfo}>
-                      <Text style={styles.appointmentTime}>
-                        {apt.startTime} - {apt.endTime}
-                      </Text>
-                      <Text style={styles.appointmentClient}>{apt.client}</Text>
-                      <Text style={styles.appointmentService}>{apt.service}</Text>
-                      <Text style={styles.appointmentPrice}>£{apt.price}</Text>
+                      <Typography variant="caption" style={styles.appointmentTime}>
+                        {apt.start_time} - {apt.end_time}
+                      </Typography>
+                      <Typography variant="body1" style={styles.appointmentClient}>
+                        {apt.customer_name}
+                      </Typography>
+                      <Typography variant="body2" style={styles.appointmentService}>
+                        {apt.service_name}
+                      </Typography>
+                      <Typography variant="body1" style={styles.appointmentPrice}>
+                        £{apt.price}
+                      </Typography>
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -453,7 +390,7 @@ export const BusinessBookingsScreen: React.FC = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Appointment Details</Text>
+              <Typography variant="h2" style={styles.modalTitle}>Appointment Details</Typography>
               <TouchableOpacity 
                 onPress={() => setSelectedAppointment(null)}
                 style={styles.closeButton}
@@ -464,43 +401,55 @@ export const BusinessBookingsScreen: React.FC = () => {
 
             <ScrollView style={styles.modalBody}>
               <View style={[styles.statusBadge, { backgroundColor: selectedAppointment.color }]}>
-                <Text style={styles.statusText}>{selectedAppointment.status}</Text>
+                <Typography variant="button" style={styles.statusText}>
+                  {selectedAppointment.status}
+                </Typography>
               </View>
 
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Date & Time</Text>
-                <Text style={styles.detailText}>
+                <Typography variant="body2" style={styles.detailLabel}>Date & Time</Typography>
+                <Typography variant="body1" style={styles.detailText}>
                   {new Date(selectedAppointment.date).toLocaleDateString('en-US', {
                     weekday: 'long',
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric'
                   })}
-                </Text>
-                <Text style={styles.detailText}>
-                  {selectedAppointment.startTime} - {selectedAppointment.endTime}
-                </Text>
+                </Typography>
+                <Typography variant="body1" style={styles.detailText}>
+                  {selectedAppointment.start_time} - {selectedAppointment.end_time}
+                </Typography>
               </View>
 
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Client Information</Text>
-                <Text style={styles.detailText}>{selectedAppointment.client}</Text>
-                <Text style={styles.detailSubtext}>{selectedAppointment.email}</Text>
-                <Text style={styles.detailSubtext}>{selectedAppointment.phone}</Text>
+                <Typography variant="body2" style={styles.detailLabel}>Client Information</Typography>
+                <Typography variant="body1" style={styles.detailText}>
+                  {selectedAppointment.customer_name}
+                </Typography>
+                <Typography variant="body2" style={styles.detailSubtext}>
+                  {selectedAppointment.customer_email}
+                </Typography>
+                <Typography variant="body2" style={styles.detailSubtext}>
+                  {selectedAppointment.customer_phone}
+                </Typography>
               </View>
 
               <View style={styles.detailSection}>
-                <Text style={styles.detailLabel}>Service</Text>
-                <Text style={styles.detailText}>{selectedAppointment.service}</Text>
-                <Text style={styles.priceText}>
+                <Typography variant="body2" style={styles.detailLabel}>Service</Typography>
+                <Typography variant="body1" style={styles.detailText}>
+                  {selectedAppointment.service_name}
+                </Typography>
+                <Typography variant="h3" style={styles.priceText}>
                   £{selectedAppointment.price.toFixed(2)}
-                </Text>
+                </Typography>
               </View>
 
               {selectedAppointment.notes && (
                 <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Notes</Text>
-                  <Text style={styles.detailText}>{selectedAppointment.notes}</Text>
+                  <Typography variant="body2" style={styles.detailLabel}>Notes</Typography>
+                  <Typography variant="body1" style={styles.detailText}>
+                    {selectedAppointment.notes}
+                  </Typography>
                 </View>
               )}
             </ScrollView>
@@ -510,7 +459,7 @@ export const BusinessBookingsScreen: React.FC = () => {
                 style={[styles.footerButton, styles.cancelButton]}
                 onPress={() => setSelectedAppointment(null)}
               >
-                <Text style={styles.footerButtonText}>Close</Text>
+                <Typography variant="button" style={styles.footerButtonText}>Close</Typography>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[styles.footerButton, styles.editButton]}
@@ -519,7 +468,7 @@ export const BusinessBookingsScreen: React.FC = () => {
                   setSelectedAppointment(null);
                 }}
               >
-                <Text style={styles.footerButtonText}>Edit</Text>
+                <Typography variant="button" style={styles.footerButtonText}>Edit</Typography>
               </TouchableOpacity>
             </View>
           </View>
@@ -534,7 +483,7 @@ export const BusinessBookingsScreen: React.FC = () => {
       <BusinessTopBar />
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.screenTitle}>Appointments</Text>
+          <Typography variant="h1" style={styles.screenTitle}>Appointments</Typography>
           {renderViewModeSelector()}
         </View>
 
@@ -542,13 +491,13 @@ export const BusinessBookingsScreen: React.FC = () => {
           <TouchableOpacity onPress={() => navigateDate('prev')}>
             <MaterialCommunityIcons name="chevron-left" size={24} color="#666666" />
           </TouchableOpacity>
-          <Text style={styles.dateText}>
+          <Typography variant="h2" style={styles.dateText}>
             {selectedDate.toLocaleDateString('en-US', { 
               month: 'long',
               year: 'numeric',
               ...(viewMode !== 'month' && { day: 'numeric' })
             })}
-          </Text>
+          </Typography>
           <TouchableOpacity onPress={() => navigateDate('next')}>
             <MaterialCommunityIcons name="chevron-right" size={24} color="#666666" />
           </TouchableOpacity>
@@ -558,15 +507,15 @@ export const BusinessBookingsScreen: React.FC = () => {
           <View style={styles.weekDayHeader}>
             {(viewMode === 'week' ? weekDates : [selectedDate]).map((date, index) => (
               <View key={date.toISOString()} style={styles.weekDayCell}>
-                <Text style={styles.weekDayText}>
+                <Typography variant="body2" style={styles.weekDayText}>
                   {viewMode === 'week' ? WEEKDAYS[index] : WEEKDAYS[date.getDay()]}
-                </Text>
-                <Text style={[
+                </Typography>
+                <Typography variant="body1" style={[
                   styles.weekDateText,
                   date.toDateString() === new Date().toDateString() && styles.todayDate
                 ]}>
                   {date.getDate()}
-                </Text>
+                </Typography>
               </View>
             ))}
           </View>
@@ -577,18 +526,14 @@ export const BusinessBookingsScreen: React.FC = () => {
           showsVerticalScrollIndicator={true}
           contentContainerStyle={[
             styles.scrollViewContent,
-            { paddingBottom: 100 } // Add padding for navigation bar
+            { paddingBottom: 100 }
           ]}
         >
           {viewMode === 'month' ? renderMonthView() : renderTimeGrid()}
         </ScrollView>
 
-        <TouchableOpacity style={styles.addButton}>
-          <MaterialCommunityIcons name="plus" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        {renderAppointmentModal()}
       </View>
-      <BusinessNavigationBar />
-      {renderAppointmentModal()}
     </SafeAreaView>
   );
 };
@@ -610,6 +555,7 @@ const styles = StyleSheet.create({
   screenTitle: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#333333',
   },
   viewModeContainer: {
     flexDirection: 'row',
@@ -647,6 +593,7 @@ const styles = StyleSheet.create({
   dateText: {
     fontSize: 16,
     fontWeight: '500',
+    color: '#333333',
   },
   weekDayHeader: {
     flexDirection: 'row',
@@ -708,9 +655,14 @@ const styles = StyleSheet.create({
   appointment: {
     position: 'absolute',
     padding: 8,
-    borderRadius: 4,
+    borderRadius: 8,
     overflow: 'hidden',
     margin: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   appointmentTime: {
     fontSize: 10,
@@ -732,22 +684,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '500',
     marginTop: 2,
-  },
-  addButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: 80, // Adjusted to be above navigation bar
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FF5722',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
   },
   monthContainer: {
     flex: 1,
@@ -776,7 +712,7 @@ const styles = StyleSheet.create({
     borderColor: '#EEEEEE',
   },
   monthDayWithAppointments: {
-    backgroundColor: '#FFE0D6', // Pastel orange
+    backgroundColor: '#FFE0D6',
   },
   selectedMonthDay: {
     backgroundColor: '#FF5722',
@@ -795,6 +731,7 @@ const styles = StyleSheet.create({
   selectedDayTitle: {
     fontSize: 16,
     fontWeight: '500',
+    color: '#333333',
     marginBottom: 8,
   },
   dayAppointmentsList: {
@@ -814,7 +751,6 @@ const styles = StyleSheet.create({
   },
   appointmentStatus: {
     width: 6,
-    height: 6,
     borderRadius: 3,
     marginRight: 8,
   },
@@ -845,6 +781,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
+    color: '#333333',
   },
   closeButton: {
     padding: 5,

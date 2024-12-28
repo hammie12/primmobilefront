@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
-  TouchableOpacity,
   Switch,
   TextInput,
   Alert,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { BusinessTopBar } from '../../components/BusinessTopBar';
-import { BusinessNavigationBar } from '../../components/BusinessNavigationBar';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
+import { Typography } from '../../components/Typography';
 
 export const CancellationPolicyScreen = () => {
   const [policy, setPolicy] = useState({
@@ -26,20 +22,16 @@ export const CancellationPolicyScreen = () => {
   };
 
   return (
-    <>
-      <BusinessTopBar />
-      <BaseSettingsScreen>
-        <View style={styles.header}>
-          <Text style={styles.title}>Cancellation Policy</Text>
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <MaterialCommunityIcons name="content-save" size={24} color="#FFFFFF" />
-            <Text style={styles.saveButtonText}>Save</Text>
-          </TouchableOpacity>
-        </View>
-
+    <BaseSettingsScreen 
+      title="Cancellation Policy"
+      onSave={handleSave}
+    >
+      <View style={styles.container}>
         <View style={styles.card}>
           <View style={styles.switchRow}>
-            <Text style={styles.label}>Enable Cancellation Policy</Text>
+            <Typography variant="body1" style={styles.label}>
+              Enable Cancellation Policy
+            </Typography>
             <Switch
               value={policy.enabled}
               onValueChange={(value) => setPolicy({ ...policy, enabled: value })}
@@ -51,18 +43,23 @@ export const CancellationPolicyScreen = () => {
           {policy.enabled && (
             <>
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Notice Period (hours)</Text>
+                <Typography variant="body2" style={styles.label}>
+                  Notice Period (hours)
+                </Typography>
                 <TextInput
                   style={styles.input}
                   value={policy.noticePeriod}
                   onChangeText={(text) => setPolicy({ ...policy, noticePeriod: text })}
                   placeholder="Enter notice period in hours"
                   keyboardType="numeric"
+                  placeholderTextColor="#999"
                 />
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Refund Percentage</Text>
+                <Typography variant="body2" style={styles.label}>
+                  Refund Percentage
+                </Typography>
                 <View style={styles.percentageInput}>
                   <TextInput
                     style={styles.input}
@@ -70,13 +67,18 @@ export const CancellationPolicyScreen = () => {
                     onChangeText={(text) => setPolicy({ ...policy, refundPercentage: text })}
                     placeholder="Enter refund percentage"
                     keyboardType="numeric"
+                    placeholderTextColor="#999"
                   />
-                  <Text style={styles.percentageSymbol}>%</Text>
+                  <Typography variant="body1" style={styles.percentageSymbol}>
+                    %
+                  </Typography>
                 </View>
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>Custom Message</Text>
+                <Typography variant="body2" style={styles.label}>
+                  Custom Message
+                </Typography>
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   value={policy.customMessage}
@@ -85,28 +87,21 @@ export const CancellationPolicyScreen = () => {
                   multiline
                   numberOfLines={4}
                   textAlignVertical="top"
+                  placeholderTextColor="#999"
                 />
               </View>
             </>
           )}
         </View>
-      </BaseSettingsScreen>
-      <BusinessNavigationBar />
-    </>
+      </View>
+    </BaseSettingsScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333333',
+  container: {
+    flex: 1,
+    padding: 16,
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -115,19 +110,27 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingVertical: 8,
   },
   inputGroup: {
     marginBottom: 16,
   },
   label: {
-    fontSize: 16,
-    color: '#666666',
+    color: '#333333',
     marginBottom: 8,
   },
   input: {
@@ -136,6 +139,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
+    color: '#333333',
+    backgroundColor: '#F8F8F8',
   },
   textArea: {
     height: 100,
@@ -147,21 +152,6 @@ const styles = StyleSheet.create({
   },
   percentageSymbol: {
     marginLeft: 8,
-    fontSize: 16,
-    color: '#666666',
-  },
-  saveButton: {
-    backgroundColor: '#FF5722',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: '#333333',
   },
 });
