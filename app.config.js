@@ -15,7 +15,9 @@ export default {
       "**/*"
     ],
     ios: {
-      supportsTablet: true
+      supportsTablet: true,
+      bundleIdentifier: "com.primmobile.app",
+      buildNumber: "1.0.0"
     },
     android: {
       adaptiveIcon: {

@@ -16,7 +16,9 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app needs access to location to show nearby services.",
         "NSLocationAlwaysUsageDescription": "This app needs access to location to show nearby services."
-      }
+      },
+      "bundleIdentifier": "com.yourcompany.yourappname",
+      "buildNumber": "1.0.0"
     },
     "android": {
       "adaptiveIcon": {
@@ -46,7 +48,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow PrimMobile to use your location to show nearby services."
         }
-      ]
+      ],
+      "react-native-svg"
     ]
   }
 }

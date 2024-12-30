@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,10 @@ import {
   Modal,
   Platform,
   Image,
+  Alert,
+  ActivityIndicator,
+  Animated,
+  TextInput,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,6 +23,40 @@ import { Typography } from '../components/Typography';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { generateRandomColor } from '../utils/colors';
+import NetInfo from '@react-native-community/netinfo';
+import type { Database } from '../lib/supabase/schema';
+
+// Add status colors and icons
+const STATUS_STYLES = {
+  PENDING: {
+    color: '#FFA000',
+    icon: 'clock-outline',
+    label: 'Pending'
+  },
+  CONFIRMED: {
+    color: '#2196F3',
+    icon: 'check-circle-outline',
+    label: 'Confirmed'
+  },
+  COMPLETED: {
+    color: '#4CAF50',
+    icon: 'check-circle',
+    label: 'Completed'
+  },
+  CANCELLED: {
+    color: '#F44336',
+    icon: 'close-circle',
+    label: 'Cancelled'
+  }
+};
+
+// Queue for offline operations
+type QueuedOperation = {
+  id: string;
+  type: 'complete' | 'cancel';
+  data: any;
+  timestamp: number;
+};
 
 type ViewMode = 'day' | 'week' | 'month';
 type Appointment = {
@@ -41,6 +79,68 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const TIME_SLOTS = Array.from({ length: 13 }, (_, i) => `${i + 6}:00`);
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
+const updateBookingStatus = async (bookingId: string, status: Database["public"]["Enums"]["booking_status"], notes?: string) => {
+  try {
+    console.log('=== Booking Status Update ===');
+    console.log(`Booking ID: ${bookingId}`);
+    console.log(`Target Status: ${status}`);
+    console.log(`Notes provided: ${notes ? 'Yes' : 'No'}`);
+    
+    if (status === 'COMPLETED') {
+      // Use the existing complete_booking function
+      const { data, error } = await supabase
+        .rpc('complete_booking', { 
+          p_booking_id: bookingId,
+          p_completion_notes: notes || null
+        });
+      
+      if (error) {
+        console.error('Booking completion failed:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
+      
+      console.log('Booking completed successfully');
+      return true;
+    } else {
+      // For other status updates, use normal update
+      const { error } = await supabase
+        .from('bookings')
+        .update({ 
+          status: status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bookingId);
+      
+      if (error) {
+        console.error('Status update failed:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        throw error;
+      }
+      
+      console.log(`Status successfully updated to ${status}`);
+      return true;
+    }
+  } catch (error) {
+    console.error('=== Booking Update Failed ===');
+    console.error('Error details:', {
+      error,
+      bookingId,
+      status,
+      notes: notes ? 'Provided' : 'Not provided'
+    });
+    return false;
+  }
+};
+
 export const BusinessBookingsScreen = () => {
   const navigation = useNavigation();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -50,6 +150,149 @@ export const BusinessBookingsScreen = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
+  const [isCompletingBooking, setIsCompletingBooking] = useState(false);
+  const [completionNotes, setCompletionNotes] = useState('');
+  const [operationQueue, setOperationQueue] = useState<QueuedOperation[]>([]);
+  const [isOnline, setIsOnline] = useState(true);
+  const [statusAnimation] = useState(new Animated.Value(0));
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Check network status
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected ?? true);
+    });
+
+    // Initial check
+    NetInfo.fetch().then(state => {
+      setIsOnline(state.isConnected ?? true);
+    });
+
+    // Cleanup subscription
+    return () => unsubscribe();
+  }, []);
+
+  // Process queued operations when coming online
+  useEffect(() => {
+    if (isOnline && operationQueue.length > 0) {
+      processQueue();
+    }
+  }, [isOnline]);
+
+  const processQueue = async () => {
+    while (operationQueue.length > 0) {
+      const operation = operationQueue[0];
+      try {
+        if (operation.type === 'complete') {
+          await updateBookingStatus(operation.id, 'COMPLETED');
+        }
+        // Remove from queue if successful
+        setOperationQueue(queue => queue.filter(op => op.id !== operation.id));
+      } catch (error) {
+        console.error('Error processing queued operation:', error);
+        break;
+      }
+    }
+  };
+
+  const handleComplete = async (appointment: Appointment) => {
+    try {
+      setIsCompletingBooking(true);
+      setErrorMessage(null);
+
+      // Show confirmation dialog
+      const confirmed = await new Promise((resolve) => {
+        Alert.alert(
+          'Complete Appointment',
+          'Are you sure you want to mark this appointment as completed?',
+          [
+            { text: 'Cancel', onPress: () => resolve(false), style: 'cancel' },
+            { text: 'Complete', onPress: () => resolve(true) }
+          ]
+        );
+      });
+
+      if (!confirmed) {
+        setIsCompletingBooking(false);
+        return;
+      }
+
+      // Check network status
+      if (!isOnline) {
+        // Queue the operation for later
+        setOperationQueue(queue => [...queue, {
+          id: appointment.id,
+          type: 'complete',
+          data: { notes: completionNotes },
+          timestamp: Date.now()
+        }]);
+        
+        // Optimistic update
+        updateLocalAppointmentStatus(appointment.id, 'COMPLETED');
+        setSelectedAppointment(null);
+        return;
+      }
+
+      // Attempt to update status
+      const success = await updateBookingStatus(
+        appointment.id, 
+        'COMPLETED',
+        completionNotes || undefined
+      );
+      
+      if (success) {
+        // Animate status change
+        Animated.sequence([
+          Animated.timing(statusAnimation, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true
+          }),
+          Animated.timing(statusAnimation, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true
+          })
+        ]).start();
+
+        // Update local state
+        updateLocalAppointmentStatus(appointment.id, 'COMPLETED');
+        
+        // Show success message
+        Alert.alert('Success', 'Appointment marked as completed successfully');
+        
+        // Close modal and clear notes
+        setSelectedAppointment(null);
+        setCompletionNotes('');
+      } else {
+        throw new Error('Failed to update booking status');
+      }
+    } catch (error) {
+      console.error('Error completing appointment:', error);
+      setErrorMessage('Failed to complete appointment. Please try again.');
+      
+      Alert.alert(
+        'Error',
+        'Failed to complete appointment. Would you like to retry?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => handleComplete(appointment) }
+        ]
+      );
+    } finally {
+      setIsCompletingBooking(false);
+    }
+  };
+
+  const updateLocalAppointmentStatus = (appointmentId: string, status: "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED") => {
+    setAppointments(prevAppointments => 
+      prevAppointments.map(apt => 
+        apt.id === appointmentId 
+          ? { ...apt, status, completedAt: status === 'COMPLETED' ? new Date().toISOString() : undefined }
+          : apt
+      )
+    );
+  };
 
   useEffect(() => {
     const fetchAppointments = async () => {
@@ -377,6 +620,25 @@ export const BusinessBookingsScreen = () => {
     );
   };
 
+  const renderStatusBadge = (status: "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED") => {
+    const statusStyle = STATUS_STYLES[status];
+    return (
+      <Animated.View style={[
+        styles.statusBadge,
+        { backgroundColor: statusStyle.color },
+        { transform: [{ scale: statusAnimation.interpolate({
+          inputRange: [0, 0.5, 1],
+          outputRange: [1, 1.1, 1]
+        }) }] }
+      ]}>
+        <MaterialCommunityIcons name={statusStyle.icon} size={16} color="#FFFFFF" />
+        <Typography variant="body1" style={styles.statusText}>
+          {statusStyle.label}
+        </Typography>
+      </Animated.View>
+    );
+  };
+
   const renderAppointmentModal = () => {
     if (!selectedAppointment) return null;
 
@@ -400,11 +662,15 @@ export const BusinessBookingsScreen = () => {
             </View>
 
             <ScrollView style={styles.modalBody}>
-              <View style={[styles.statusBadge, { backgroundColor: selectedAppointment.color }]}>
-                <Typography variant="button" style={styles.statusText}>
-                  {selectedAppointment.status}
-                </Typography>
-              </View>
+              {renderStatusBadge(selectedAppointment.status)}
+              
+              {errorMessage && (
+                <View style={styles.errorContainer}>
+                  <Typography variant="body1" style={styles.errorText}>
+                    {errorMessage}
+                  </Typography>
+                </View>
+              )}
 
               <View style={styles.detailSection}>
                 <Typography variant="body2" style={styles.detailLabel}>Date & Time</Typography>
@@ -452,6 +718,22 @@ export const BusinessBookingsScreen = () => {
                   </Typography>
                 </View>
               )}
+
+              {selectedAppointment.status !== 'COMPLETED' && (
+                <View style={styles.completionSection}>
+                  <Typography variant="body2" style={styles.detailLabel}>
+                    Completion Notes
+                  </Typography>
+                  <TextInput
+                    style={styles.notesInput}
+                    multiline
+                    numberOfLines={3}
+                    value={completionNotes}
+                    onChangeText={setCompletionNotes}
+                    placeholder="Add notes about the appointment completion..."
+                  />
+                </View>
+              )}
             </ScrollView>
 
             <View style={styles.modalFooter}>
@@ -459,17 +741,28 @@ export const BusinessBookingsScreen = () => {
                 style={[styles.footerButton, styles.cancelButton]}
                 onPress={() => setSelectedAppointment(null)}
               >
-                <Typography variant="button" style={styles.footerButtonText}>Close</Typography>
+                <Typography variant="body1" style={styles.footerButtonText}>Close</Typography>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.footerButton, styles.editButton]}
-                onPress={() => {
-                  // TODO: Implement edit functionality
-                  setSelectedAppointment(null);
-                }}
-              >
-                <Typography variant="button" style={styles.footerButtonText}>Edit</Typography>
-              </TouchableOpacity>
+              
+              {selectedAppointment.status !== 'COMPLETED' && (
+                <TouchableOpacity 
+                  style={[
+                    styles.footerButton, 
+                    styles.completeButton,
+                    isCompletingBooking && styles.disabledButton
+                  ]}
+                  onPress={() => handleComplete(selectedAppointment)}
+                  disabled={isCompletingBooking}
+                >
+                  {isCompletingBooking ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Typography variant="body1" style={styles.footerButtonText}>
+                      Complete
+                    </Typography>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -479,6 +772,13 @@ export const BusinessBookingsScreen = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      {!isOnline && (
+        <View style={styles.offlineBanner}>
+          <Typography variant="body2" style={styles.offlineText}>
+            You are offline. Changes will be synced when connection is restored.
+          </Typography>
+        </View>
+      )}
       <StatusBar style="dark" />
       <BusinessTopBar />
       <View style={styles.container}>
@@ -849,5 +1149,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#FFFFFF',
+  },
+  completeButton: {
+    backgroundColor: '#4CAF50',
+    marginHorizontal: 5,
+  },
+  disabledButton: {
+    backgroundColor: '#CCCCCC',
+  },
+  errorContainer: {
+    marginBottom: 20,
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  completionSection: {
+    marginBottom: 20,
+  },
+  notesInput: {
+    borderWidth: 1,
+    borderColor: '#CCCCCC',
+    borderRadius: 8,
+    padding: 12,
+  },
+  offlineBanner: {
+    backgroundColor: '#FF5722',
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offlineText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

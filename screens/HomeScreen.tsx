@@ -38,89 +38,98 @@ export const HomeScreen = () => {
     revenueToday: 0,
     totalClients: 0,
   });
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [professionalId, setProfessionalId] = useState<string | null>(null);
 
-  // First fetch the business ID for the current user
+  // First fetch the professional profile ID for the current user
   useEffect(() => {
-    const fetchBusinessId = async () => {
+    const fetchProfessionalId = async () => {
       if (!user) return;
 
       try {
-        const { data: business, error } = await db.businesses.getByOwner(user.id);
+        const { data: profile, error } = await supabase
+          .from('professional_profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .single();
+
         if (error) throw error;
         
-        if (business && business.length > 0) {
-          setBusinessId(business[0].id);
+        if (profile) {
+          setProfessionalId(profile.id);
         }
       } catch (error) {
-        console.error('Error fetching business:', error);
-        Alert.alert('Error', 'Failed to load business information');
+        console.error('Error fetching professional profile:', error);
+        Alert.alert('Error', 'Failed to load professional information');
       }
     };
 
-    fetchBusinessId();
+    fetchProfessionalId();
   }, [user]);
 
-  // Then fetch metrics using the business ID
+  // Then fetch metrics using the professional ID
   useEffect(() => {
     const fetchMetrics = async () => {
-      if (!businessId) return;
+      if (!professionalId) return;
 
       try {
-        // Get today's start and end timestamps
+        // Get today's start and end timestamps in ISO format
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
 
-        // Fetch today's bookings
+        // Fetch today's bookings and revenue
         const { data: todayBookings, error: bookingsError } = await supabase
           .from('bookings')
           .select(`
             id,
             service_id,
             services (
-              id,
               price
             )
           `)
-          .eq('business_id', businessId)
+          .eq('professional_id', professionalId)
           .gte('start_time', today.toISOString())
           .lt('start_time', tomorrow.toISOString());
 
         if (bookingsError) throw bookingsError;
 
-        // Calculate metrics
-        const bookingsToday = todayBookings?.length || 0;
+        // Calculate today's revenue
         const revenueToday = todayBookings?.reduce((sum, booking) => {
-          const servicePrice = (booking.services as any)?.price || 0;
-          return sum + servicePrice;
+          return sum + ((booking.services as any)?.price || 0);
         }, 0) || 0;
 
-        // Fetch total unique clients
-        const { count: totalClients, error: clientsError } = await supabase
+        // Fetch total unique clients (all time)
+        const { data: uniqueClients, error: clientsError } = await supabase
           .from('bookings')
-          .select('customer_id', { count: 'exact', head: true })
-          .eq('business_id', businessId)
+          .select('customer_id')
+          .eq('professional_id', professionalId)
           .not('customer_id', 'is', null);
 
         if (clientsError) throw clientsError;
 
+        // Count unique customer IDs
+        const uniqueCustomerIds = new Set(uniqueClients?.map(b => b.customer_id));
+        
         setMetrics({
-          bookingsToday,
-          revenueToday,
-          totalClients: totalClients || 0,
+          bookingsToday: todayBookings?.length || 0,
+          revenueToday: revenueToday,
+          totalClients: uniqueCustomerIds.size
         });
+
       } catch (error) {
         console.error('Error fetching metrics:', error);
         Alert.alert('Error', 'Failed to load metrics. Please try again.');
       }
     };
 
-    if (businessId) {
+    if (professionalId) {
       fetchMetrics();
+      // Set up an interval to refresh metrics every minute
+      const interval = setInterval(fetchMetrics, 60000);
+      return () => clearInterval(interval);
     }
-  }, [businessId]);
+  }, [professionalId]);
 
   const renderMetricCard = (title: string, value: string, icon: keyof typeof MaterialCommunityIcons.glyphMap) => (
     <View style={styles.metricCard}>
