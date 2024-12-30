@@ -25,6 +25,7 @@ type RootStackParamList = {
   BusinessHours: undefined;
   ProfessionalProfile: undefined;
   DepositSettings: undefined;
+  BusinessAnalytics: undefined;
   // Add other screen names as needed
 };
 
@@ -132,11 +133,14 @@ export const HomeScreen = () => {
   }, [professionalId]);
 
   const renderMetricCard = (title: string, value: string, icon: keyof typeof MaterialCommunityIcons.glyphMap) => (
-    <View style={styles.metricCard}>
+    <TouchableOpacity 
+      style={styles.metricCard}
+      onPress={() => navigation.navigate('BusinessAnalytics')}
+    >
       <MaterialCommunityIcons name={icon} size={24} color="#FF5722" />
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricTitle}>{title}</Text>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderActionCard = (
