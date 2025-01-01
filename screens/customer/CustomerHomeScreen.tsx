@@ -5,9 +5,9 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Typography } from '../../components/Typography';
 import { supabase } from '../../lib/supabase';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import * as Location from 'expo-location';
 
 interface Professional {
   id: string;
@@ -16,8 +16,8 @@ interface Professional {
   profile_image: string;
   rating: number;
   review_count: number;
-  about?: string;
-  title?: string;
+  address: string | null;
+  distance?: number;
 }
 
 interface Booking {
@@ -37,14 +37,91 @@ export const CustomerHomeScreen = () => {
   const [loading, setLoading] = useState(true);
   const [upcomingBookings, setUpcomingBookings] = useState<Booking[]>([]);
   const [firstName, setFirstName] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const isFocused = useIsFocused();
+  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    fetchProfessionals();
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.error('Location permission denied');
+        return;
+      }
+
+      try {
+        const location = await Location.getCurrentPositionAsync({});
+        setLocation(location);
+        fetchProfessionals(location);
+      } catch (error) {
+        console.error('Error getting location:', error);
+        fetchProfessionals();
+      }
+    })();
     fetchUpcomingBookings();
     fetchUserName();
   }, []);
 
-  const fetchProfessionals = async () => {
+  useEffect(() => {
+    if (isFocused) {
+      fetchUpcomingBookings();
+      
+      const interval = setInterval(() => {
+        fetchUpcomingBookings();
+      }, 60000);
+      
+      setRefreshInterval(interval);
+      
+      return () => {
+        if (refreshInterval) {
+          clearInterval(refreshInterval);
+        }
+      };
+    } else {
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+        setRefreshInterval(null);
+      }
+    }
+  }, [isFocused]);
+
+  const calculateDistance = async (address: string | null, userLat: number, userLon: number): Promise<number> => {
+    if (!address || typeof address !== 'string') return -1;
+    
+    try {
+      const addressObj = JSON.parse(address);
+      const postcode = addressObj.postcode;
+      
+      if (!postcode) return -1;
+
+      // Use the postcodes.io API to get coordinates from postcode
+      const response = await fetch(`https://api.postcodes.io/postcodes/${postcode}`);
+      const data = await response.json();
+      
+      if (!data.result) return -1;
+
+      const profLat = data.result.latitude;
+      const profLon = data.result.longitude;
+
+      if (!profLat || !profLon) return -1;
+
+      const R = 6371; // Earth's radius in km
+      const dLat = (profLat - userLat) * Math.PI / 180;
+      const dLon = (profLon - userLon) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(userLat * Math.PI / 180) * Math.cos(profLat * Math.PI / 180) * 
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    } catch (error) {
+      console.error('Error calculating distance:', error);
+      return -1;
+    }
+  };
+
+  const fetchProfessionals = async (userLocation?: Location.LocationObject) => {
     try {
       const { data: professionalsData, error: professionalsError } = await supabase
         .from('professionals')
@@ -55,13 +132,35 @@ export const CustomerHomeScreen = () => {
           profile_image,
           rating,
           review_count,
-          about,
-          title
-        `)
-        .order('rating', { ascending: false });
+          address
+        `);
 
       if (professionalsError) throw professionalsError;
-      setProfessionals(professionalsData || []);
+
+      if (userLocation && professionalsData) {
+        // Calculate distances for all professionals
+        const professionalPromises = professionalsData.map(async prof => {
+          const distance = await calculateDistance(
+            prof.address,
+            userLocation.coords.latitude,
+            userLocation.coords.longitude
+          );
+          return { ...prof, distance };
+        });
+
+        const professionalsWithDistance = await Promise.all(professionalPromises);
+        
+        // Sort by distance
+        const sortedProfessionals = professionalsWithDistance.sort((a, b) => {
+          if (a.distance === -1) return 1;
+          if (b.distance === -1) return -1;
+          return a.distance - b.distance;
+        });
+
+        setProfessionals(sortedProfessionals);
+      } else {
+        setProfessionals(professionalsData || []);
+      }
     } catch (error) {
       console.error('Error fetching professionals:', error);
     } finally {
@@ -74,34 +173,56 @@ export const CustomerHomeScreen = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: customerProfile, error: customerError } = await supabase
+      const { data: customerProfile } = await supabase
         .from('customer_profiles')
         .select('id')
         .eq('user_id', user.id)
         .single();
 
-      if (customerError) throw customerError;
+      if (!customerProfile) return;
+
+      const now = new Date().toISOString();
 
       const { data: bookings, error: bookingsError } = await supabase
         .from('bookings')
         .select(`
           id,
           start_time,
-          services (
+          end_time,
+          status,
+          services!service_id (
             name
           ),
-          professional_profiles (
+          professional_profiles!professional_id (
             business_name
           )
         `)
         .eq('customer_id', customerProfile.id)
-        .eq('status', 'CONFIRMED')
-        .gte('start_time', new Date().toISOString())
+        .in('status', ['CONFIRMED', 'PENDING'])
+        .gte('start_time', now)
         .order('start_time', { ascending: true })
         .limit(3);
 
-      if (bookingsError) throw bookingsError;
-      setUpcomingBookings(bookings || []);
+      if (bookingsError) {
+        console.error('Error in bookings query:', bookingsError);
+        throw bookingsError;
+      }
+
+      console.log('Raw bookings data:', bookings);
+
+      const formattedBookings = bookings?.map(booking => ({
+        id: booking.id,
+        start_time: booking.start_time,
+        services: {
+          name: booking.services?.name || 'Service'
+        },
+        professional_profiles: {
+          business_name: booking.professional_profiles?.business_name || 'Business Name'
+        }
+      })) || [];
+
+      console.log('Formatted upcoming bookings:', formattedBookings);
+      setUpcomingBookings(formattedBookings);
     } catch (error) {
       console.error('Error fetching upcoming bookings:', error);
     }
@@ -140,10 +261,7 @@ export const CustomerHomeScreen = () => {
   };
 
   const renderProfessionalCard = ({ item: professional, index }: { item: Professional, index: number }) => (
-    <Animated.View
-      entering={FadeInDown.delay(index * 100).springify()}
-      style={styles.professionalCard}
-    >
+    <View style={styles.professionalCard}>
       <TouchableOpacity 
         style={styles.professionalCardContent}
         onPress={() => handleProfessionalPress(professional)}
@@ -172,67 +290,95 @@ export const CustomerHomeScreen = () => {
               {professional.category?.toUpperCase()}
             </Typography>
           </View>
-          <View style={styles.ratingContainer}>
-            <MaterialCommunityIcons name="star" size={16} color="#FFD700" />
-            <Typography variant="caption" style={styles.rating}>
-              {professional.rating ? professional.rating.toFixed(1) : 'New'}
+          <View style={styles.distanceContainer}>
+            <MaterialCommunityIcons name="map-marker" size={16} color="#666" />
+            <Typography variant="caption" style={styles.distanceText}>
+              {professional.distance && professional.distance !== -1
+                ? `${professional.distance.toFixed(1)} km away`
+                : 'Distance not available'}
             </Typography>
-            {professional.review_count > 0 && (
-              <Typography variant="caption" style={styles.reviewCount}>
-                ({professional.review_count})
-              </Typography>
-            )}
           </View>
         </View>
       </TouchableOpacity>
-    </Animated.View>
+    </View>
   );
 
   const renderRecentBookings = () => (
     <View style={styles.section}>
       <Typography variant="h2" style={styles.sectionTitle}>Upcoming Bookings</Typography>
       {upcomingBookings.length > 0 ? (
-        upcomingBookings.map((booking) => (
-          <TouchableOpacity key={booking.id} style={styles.bookingCard}>
-            <View style={styles.bookingHeader}>
-              <Typography variant="body1" style={styles.bookingTitle}>
-                {booking.services?.name || 'Service'}
-              </Typography>
-              <Typography variant="caption" style={styles.bookingDate}>
-                {new Date(booking.start_time).toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </Typography>
-            </View>
-            <View style={styles.bookingDetails}>
-              <MaterialCommunityIcons name="store" size={20} color="#FF5722" />
-              <Typography variant="caption" style={styles.bookingService}>
-                {booking.professional_profiles?.business_name}
-              </Typography>
-            </View>
-            <View style={styles.bookingTimeContainer}>
-              <MaterialCommunityIcons name="clock-outline" size={20} color="#FF5722" />
-              <Typography variant="caption" style={styles.bookingTime}>
-                {new Date(booking.start_time).toLocaleTimeString('en-US', {
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  hour12: true
-                })}
-              </Typography>
-            </View>
+        <>
+          {upcomingBookings.slice(0, 3).map((booking) => (
+            <TouchableOpacity 
+              key={booking.id} 
+              style={styles.bookingCard}
+              onPress={() => navigation.navigate('CustomerBookings', {
+                selectedBookingId: booking.id,
+                initialTab: 'upcoming'
+              })}
+            >
+              <View style={styles.bookingHeader}>
+                <Typography variant="body1" style={styles.bookingTitle}>
+                  {booking.services?.name || 'Service'}
+                </Typography>
+                <Typography variant="caption" style={styles.bookingDate}>
+                  {new Date(booking.start_time).toLocaleDateString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </Typography>
+              </View>
+              <View style={styles.bookingDetails}>
+                <MaterialCommunityIcons name="store" size={20} color="#FF5722" />
+                <Typography variant="caption" style={styles.bookingService}>
+                  {booking.professional_profiles?.business_name}
+                </Typography>
+              </View>
+              <View style={styles.bookingTimeContainer}>
+                <MaterialCommunityIcons name="clock-outline" size={20} color="#FF5722" />
+                <Typography variant="caption" style={styles.bookingTime}>
+                  {new Date(booking.start_time).toLocaleTimeString('en-US', {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true
+                  })}
+                </Typography>
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity 
+            style={styles.viewAllButton}
+            onPress={() => navigation.navigate('CustomerBookings', { initialTab: 'upcoming' })}
+          >
+            <Typography variant="body1" style={styles.viewAllButtonText}>
+              View All Bookings
+            </Typography>
+            <MaterialCommunityIcons name="chevron-right" size={24} color="#FF5722" />
           </TouchableOpacity>
-        ))
+        </>
       ) : (
         <View style={styles.noBookingsContainer}>
           <MaterialCommunityIcons name="calendar-blank" size={48} color="#CCC" />
           <Typography variant="body1" style={styles.noBookingsText}>
             No upcoming bookings
           </Typography>
+          <TouchableOpacity 
+            style={styles.viewAllButton}
+            onPress={() => navigation.navigate('CustomerBookings', { initialTab: 'upcoming' })}
+          >
+            <Typography variant="body1" style={styles.viewAllButtonText}>
+              View All Bookings
+            </Typography>
+            <MaterialCommunityIcons name="chevron-right" size={24} color="#FF5722" />
+          </TouchableOpacity>
         </View>
       )}
     </View>
+  );
+
+  const filteredProfessionals = professionals.filter(professional => 
+    selectedCategory === 'ALL' || professional.category?.toUpperCase() === selectedCategory
   );
 
   return (
@@ -249,9 +395,6 @@ export const CustomerHomeScreen = () => {
             Welcome back{firstName ? `, ${firstName}` : ''}
           </Typography>
         </View>
-        <TouchableOpacity onPress={() => {}} style={styles.notificationButton}>
-          <MaterialCommunityIcons name="bell-outline" size={24} color="#FF5722" />
-        </TouchableOpacity>
       </LinearGradient>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -264,9 +407,19 @@ export const CustomerHomeScreen = () => {
             {['ALL', 'HAIR', 'NAILS', 'LASHES'].map((category) => (
               <TouchableOpacity 
                 key={category} 
-                style={styles.categoryChip}
+                style={[
+                  styles.categoryChip,
+                  selectedCategory === category && styles.selectedCategoryChip
+                ]}
+                onPress={() => setSelectedCategory(category)}
               >
-                <Typography variant="caption" style={styles.categoryText}>
+                <Typography 
+                  variant="caption" 
+                  style={[
+                    styles.categoryText,
+                    selectedCategory === category && styles.selectedCategoryText
+                  ]}
+                >
                   {category}
                 </Typography>
               </TouchableOpacity>
@@ -276,10 +429,10 @@ export const CustomerHomeScreen = () => {
 
         <View style={styles.section}>
           <Typography variant="h2" style={styles.sectionTitle}>
-            Top Rated Professionals
+            Nearby Professionals
           </Typography>
           <FlatList
-            data={professionals}
+            data={filteredProfessionals}
             renderItem={renderProfessionalCard}
             keyExtractor={(item) => item.id}
             scrollEnabled={false}
@@ -297,9 +450,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 24,
     backgroundColor: '#FFF',
@@ -316,17 +466,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
     letterSpacing: -0.5,
-  },
-  notificationButton: {
-    padding: 12,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    shadowColor: '#FF5722',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FFE5E0',
   },
   content: {
     flex: 1,
@@ -358,22 +497,19 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderWidth: 1,
     borderColor: '#F0F0F0',
-    transform: [{ scale: 1 }],
   },
   professionalCardContent: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
   },
   professionalImage: {
-    width: 110,
-    height: 110,
+    width: '100%',
+    height: 200,
     borderRadius: 20,
-    marginRight: 16,
+    marginBottom: 16,
   },
   professionalInfo: {
-    flex: 1,
-    justifyContent: 'space-between',
-    height: 80,
+    width: '100%',
   },
   professionalName: {
     fontSize: 18,
@@ -392,6 +528,12 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
+  },
+  professionalBio: {
+    color: '#666',
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
   },
   ratingContainer: {
     flexDirection: 'row',
@@ -512,5 +654,43 @@ const styles = StyleSheet.create({
   noBookingsText: {
     color: '#666',
     marginTop: 8,
+  },
+  selectedCategoryChip: {
+    backgroundColor: '#FF5722',
+  },
+  selectedCategoryText: {
+    color: '#FFFFFF',
+  },
+  distanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: '#F8F8F8',
+    padding: 8,
+    borderRadius: 8,
+  },
+  distanceText: {
+    marginLeft: 4,
+    color: '#666',
+    fontSize: 14,
+    flex: 1,
+  },
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF8F6',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    marginTop: 12,
+    marginHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#FFE5E0',
+  },
+  viewAllButtonText: {
+    color: '#FF5722',
+    fontWeight: '600',
+    marginRight: 8,
   },
 });

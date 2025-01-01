@@ -25,6 +25,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { generateRandomColor } from '../utils/colors';
 import NetInfo from '@react-native-community/netinfo';
 import type { Database } from '../lib/supabase/schema';
+import { Calendar, CalendarProvider, WeekCalendar, DateData } from 'react-native-calendars';
 
 // Add status colors and icons
 const STATUS_STYLES = {
@@ -78,6 +79,17 @@ type Appointment = {
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const TIME_SLOTS = Array.from({ length: 13 }, (_, i) => `${i + 6}:00`);
 const SCREEN_HEIGHT = Dimensions.get('window').height;
+
+// Add these new types
+type MarkedDates = {
+  [key: string]: {
+    marked: boolean;
+    dotColor?: string;
+    selected?: boolean;
+    selectedColor?: string;
+    dots?: Array<{key: string; color: string}>;
+  };
+};
 
 const updateBookingStatus = async (bookingId: string, status: Database["public"]["Enums"]["booking_status"], notes?: string) => {
   try {
@@ -141,6 +153,16 @@ const updateBookingStatus = async (bookingId: string, status: Database["public"]
   }
 };
 
+// Add this helper function at the top of the file, outside the component
+const doAppointmentsOverlap = (a: Appointment, b: Appointment) => {
+  const aStart = new Date(`${a.date}T${a.start_time}`);
+  const aEnd = new Date(`${a.date}T${a.end_time}`);
+  const bStart = new Date(`${b.date}T${b.start_time}`);
+  const bEnd = new Date(`${b.date}T${b.end_time}`);
+  
+  return aStart < bEnd && bStart < aEnd;
+};
+
 export const BusinessBookingsScreen = () => {
   const navigation = useNavigation();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -156,6 +178,7 @@ export const BusinessBookingsScreen = () => {
   const [isOnline, setIsOnline] = useState(true);
   const [statusAnimation] = useState(new Animated.Value(0));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [markedDates, setMarkedDates] = useState<MarkedDates>({});
 
   // Check network status
   useEffect(() => {
@@ -487,52 +510,121 @@ export const BusinessBookingsScreen = () => {
       }
     });
 
-    return relevantAppointments.map(appointment => {
-      const startHour = parseInt(appointment.start_time.split(':')[0]);
-      const startMinute = parseInt(appointment.start_time.split(':')[1]);
-      const endHour = parseInt(appointment.end_time.split(':')[0]);
-      const endMinute = parseInt(appointment.end_time.split(':')[1]);
+    // Group overlapping appointments
+    const groupOverlappingAppointments = (apps: Appointment[]) => {
+      const groups: Appointment[][] = [];
       
-      const top = ((startHour - 6) * 60 + startMinute);
-      const height = ((endHour - startHour) * 60 + (endMinute - startMinute));
+      apps.forEach(app => {
+        let addedToGroup = false;
+        
+        for (const group of groups) {
+          if (group.some(groupApp => doAppointmentsOverlap(groupApp, app))) {
+            group.push(app);
+            addedToGroup = true;
+            break;
+          }
+        }
+        
+        if (!addedToGroup) {
+          groups.push([app]);
+        }
+      });
       
-      let left = 0;
-      let width = '95%';
-      
-      if (viewMode === 'week') {
-        const appointmentDate = new Date(appointment.date);
-        const dayIndex = appointmentDate.getDay();
-        left = (dayIndex * (100 / 7));
-        width = '13%';
-      }
+      return groups;
+    };
 
-      return (
-        <TouchableOpacity
-          key={appointment.id}
-          style={[
-            styles.appointment,
-            {
-              top,
-              height,
-              left: `${left}%`,
-              width,
-              backgroundColor: appointment.color,
-            },
-          ]}
-          onPress={() => handleAppointmentPress(appointment)}
-        >
-          <Typography variant="caption" style={styles.appointmentTime}>
-            {appointment.start_time} - {appointment.end_time}
-          </Typography>
-          <Typography variant="body1" style={styles.appointmentClient} numberOfLines={1}>
-            {appointment.customer_name}
-          </Typography>
-          <Typography variant="body2" style={styles.appointmentService} numberOfLines={1}>
-            {appointment.service_name}
-          </Typography>
-          <Typography variant="body1" style={styles.appointmentPrice}>£{appointment.price}</Typography>
-        </TouchableOpacity>
-      );
+    // Sort appointments by start time
+    const sortedAppointments = [...relevantAppointments].sort((a, b) => {
+      return a.start_time.localeCompare(b.start_time);
+    });
+
+    // Group overlapping appointments by day
+    const appointmentsByDay: { [key: string]: Appointment[][] } = {};
+    
+    sortedAppointments.forEach(app => {
+      const dayKey = viewMode === 'week' ? new Date(app.date).getDay().toString() : '0';
+      if (!appointmentsByDay[dayKey]) {
+        appointmentsByDay[dayKey] = [];
+      }
+      const groups = groupOverlappingAppointments([...appointmentsByDay[dayKey].flat(), app]);
+      appointmentsByDay[dayKey] = groups;
+    });
+
+    return Object.entries(appointmentsByDay).flatMap(([dayKey, groups]) => {
+      return groups.flatMap((group, groupIndex) => {
+        return group.map((appointment, index) => {
+          const startHour = parseInt(appointment.start_time.split(':')[0]);
+          const startMinute = parseInt(appointment.start_time.split(':')[1]);
+          const endHour = parseInt(appointment.end_time.split(':')[0]);
+          const endMinute = parseInt(appointment.end_time.split(':')[1]);
+          
+          const top = ((startHour - 6) * 60 + startMinute);
+          const height = ((endHour - startHour) * 60 + (endMinute - startMinute));
+          
+          let left = 0;
+          let width = '95%';
+          
+          if (viewMode === 'week') {
+            const appointmentDate = new Date(appointment.date);
+            const dayIndex = appointmentDate.getDay();
+            const baseWidth = (100 / 7); // Base width for a full day column
+            const slotWidth = baseWidth * 0.95; // 95% of the day column
+            
+            // Calculate position for overlapping appointments
+            const overlapCount = group.length;
+            const overlapIndex = index;
+            const slotSegmentWidth = slotWidth / overlapCount;
+            
+            left = (dayIndex * baseWidth) + (overlapIndex * slotSegmentWidth);
+            width = `${slotSegmentWidth}%`;
+          } else {
+            // Handle overlapping in day view
+            const overlapCount = group.length;
+            const overlapIndex = index;
+            const slotWidth = 95 / overlapCount; // 95% total width divided by number of overlapping appointments
+            
+            left = overlapIndex * slotWidth;
+            width = `${slotWidth}%`;
+          }
+
+          const statusStyle = STATUS_STYLES[appointment.status];
+
+          return (
+            <TouchableOpacity
+              key={appointment.id}
+              style={[
+                styles.appointment,
+                {
+                  top,
+                  height,
+                  left: `${left}%`,
+                  width,
+                  backgroundColor: appointment.color,
+                },
+              ]}
+              onPress={() => handleAppointmentPress(appointment)}
+            >
+              <View style={styles.appointmentContent}>
+                <View style={styles.appointmentHeader}>
+                  <Typography variant="caption" style={styles.appointmentTime}>
+                    {appointment.start_time} - {appointment.end_time}
+                  </Typography>
+                  <View style={[styles.statusDot, { backgroundColor: statusStyle.color }]} />
+                </View>
+                <Typography variant="body1" style={styles.appointmentClient} numberOfLines={1}>
+                  {appointment.customer_name}
+                </Typography>
+                <Typography variant="body2" style={styles.appointmentService} numberOfLines={2}>
+                  {appointment.service_name}
+                </Typography>
+                <Typography variant="body1" style={styles.appointmentPrice}>
+                  £{appointment.price}
+                </Typography>
+              </View>
+            </TouchableOpacity>
+          );
+        });
+      });
     });
   };
 
@@ -540,54 +632,79 @@ export const BusinessBookingsScreen = () => {
     setSelectedAppointment(appointment);
   };
 
-  const renderMonthView = () => {
-    const daysInMonth = getDaysInMonth(selectedDate);
+  // Add this function to prepare calendar marked dates
+  const prepareMarkedDates = useCallback(() => {
+    const marks: MarkedDates = {};
     
+    appointments.forEach(appointment => {
+      const dateStr = appointment.date;
+      if (!marks[dateStr]) {
+        marks[dateStr] = {
+          marked: true,
+          dots: [{
+            key: appointment.id,
+            color: appointment.color
+          }]
+        };
+      } else {
+        marks[dateStr].dots?.push({
+          key: appointment.id,
+          color: appointment.color
+        });
+      }
+
+      // Mark selected date
+      if (selectedMonthDay && dateStr === selectedMonthDay.toISOString().split('T')[0]) {
+        marks[dateStr].selected = true;
+        marks[dateStr].selectedColor = '#FF5722';
+      }
+    });
+
+    setMarkedDates(marks);
+  }, [appointments, selectedMonthDay]);
+
+  useEffect(() => {
+    prepareMarkedDates();
+  }, [appointments, selectedMonthDay]);
+
+  const renderMonthView = () => {
     return (
-      <View style={styles.monthContainer}>
-        <View style={styles.monthGrid}>
-          {WEEKDAYS.map(day => (
-            <View key={day} style={styles.monthDayHeader}>
-              <Typography variant="body2" style={styles.monthDayHeaderText}>{day}</Typography>
-            </View>
-          ))}
-          {daysInMonth.map((date, index) => {
-            const hasAppointments = date && appointments.some(
-              apt => new Date(apt.date).toDateString() === date.toDateString()
-            );
-            
-            return (
-              <TouchableOpacity
-                key={index}
-                style={[
-                  styles.monthDay,
-                  hasAppointments && styles.monthDayWithAppointments,
-                  date && selectedMonthDay && date.getDate() === selectedMonthDay.getDate() && 
-                  styles.selectedMonthDay
-                ]}
-                onPress={() => date && setSelectedMonthDay(date)}
-              >
-                {date && (
-                  <Typography 
-                    variant="body1" 
-                    style={[
-                      styles.monthDayText,
-                      (date.toDateString() === new Date().toDateString()) && styles.todayText
-                    ]}
-                  >
-                    {date.getDate()}
-                  </Typography>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+      <View style={styles.calendarContainer}>
+        <Calendar
+          style={styles.calendar}
+          theme={{
+            backgroundColor: '#ffffff',
+            calendarBackground: '#ffffff',
+            textSectionTitleColor: '#666666',
+            selectedDayBackgroundColor: '#FF5722',
+            selectedDayTextColor: '#ffffff',
+            todayTextColor: '#FF5722',
+            dayTextColor: '#333333',
+            textDisabledColor: '#d9e1e8',
+            dotColor: '#FF5722',
+            selectedDotColor: '#ffffff',
+            arrowColor: '#FF5722',
+            monthTextColor: '#333333',
+            textDayFontSize: 14,
+            textMonthFontSize: 16,
+            textDayHeaderFontSize: 12
+          }}
+          markedDates={markedDates}
+          onDayPress={day => setSelectedMonthDay(new Date(day.timestamp))}
+          markingType={'multi-dot'}
+          enableSwipeMonths={true}
+        />
+        
         {selectedMonthDay && (
-          <ScrollView style={styles.selectedDayAppointments}>
+          <View style={styles.selectedDayAppointments}>
             <Typography variant="h2" style={styles.selectedDayTitle}>
-              Appointments for {selectedMonthDay.toLocaleDateString()}
+              {selectedMonthDay.toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric'
+              })}
             </Typography>
-            <View style={styles.dayAppointmentsList}>
+            <ScrollView style={styles.appointmentsList}>
               {appointments
                 .filter(apt => new Date(apt.date).toDateString() === selectedMonthDay.toDateString())
                 .map(apt => (
@@ -598,24 +715,75 @@ export const BusinessBookingsScreen = () => {
                   >
                     <View style={[styles.appointmentStatus, { backgroundColor: apt.color }]} />
                     <View style={styles.appointmentInfo}>
-                      <Typography variant="caption" style={styles.appointmentTime}>
+                      <Typography variant="caption" style={styles.monthItemTime}>
                         {apt.start_time} - {apt.end_time}
                       </Typography>
-                      <Typography variant="body1" style={styles.appointmentClient}>
+                      <Typography variant="body1" style={styles.monthItemClient}>
                         {apt.customer_name}
                       </Typography>
-                      <Typography variant="body2" style={styles.appointmentService}>
+                      <Typography variant="body2" style={styles.monthItemService}>
                         {apt.service_name}
                       </Typography>
-                      <Typography variant="body1" style={styles.appointmentPrice}>
+                      <Typography variant="body1" style={styles.monthItemPrice}>
                         £{apt.price}
                       </Typography>
                     </View>
                   </TouchableOpacity>
                 ))}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderWeekView = () => {
+    return (
+      <View style={styles.calendarContainer}>
+        <CalendarProvider 
+          date={selectedDate.toISOString().split('T')[0]}
+          onDateChanged={(date: string) => {
+            setSelectedDate(new Date(date));
+          }}
+        >
+          <WeekCalendar
+            style={styles.weekCalendar}
+            theme={{
+              backgroundColor: '#ffffff',
+              calendarBackground: '#ffffff',
+              textSectionTitleColor: '#666666',
+              selectedDayBackgroundColor: '#FF5722',
+              selectedDayTextColor: '#ffffff',
+              todayTextColor: '#FF5722',
+              dayTextColor: '#333333',
+              textDisabledColor: '#d9e1e8',
+              dotColor: '#FF5722',
+              selectedDotColor: '#ffffff',
+              arrowColor: '#FF5722',
+              monthTextColor: '#333333',
+              textDayFontSize: 14,
+              textMonthFontSize: 16,
+              textDayHeaderFontSize: 12
+            }}
+            markedDates={markedDates}
+            firstDay={1}
+            allowShadow={false}
+          />
+          <ScrollView style={styles.weekViewScrollContent}>
+            <View style={styles.timeGrid}>
+              <View style={styles.timeLabels}>
+                {TIME_SLOTS.map(time => (
+                  <View key={time} style={styles.timeLabel}>
+                    <Text style={styles.timeLabelText}>{time}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.gridContainer}>
+                {renderAppointments()}
+              </View>
             </View>
           </ScrollView>
-        )}
+        </CalendarProvider>
       </View>
     );
   };
@@ -829,7 +997,7 @@ export const BusinessBookingsScreen = () => {
             { paddingBottom: 100 }
           ]}
         >
-          {viewMode === 'month' ? renderMonthView() : renderTimeGrid()}
+          {viewMode === 'month' ? renderMonthView() : viewMode === 'week' ? renderWeekView() : renderTimeGrid()}
         </ScrollView>
 
         {renderAppointmentModal()}
@@ -954,7 +1122,6 @@ const styles = StyleSheet.create({
   },
   appointment: {
     position: 'absolute',
-    padding: 8,
     borderRadius: 8,
     overflow: 'hidden',
     margin: 1,
@@ -963,27 +1130,30 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    minHeight: 60,
+    padding: 4,
   },
   appointmentTime: {
-    fontSize: 10,
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  appointmentClient: {
+    fontSize: 13,
+    fontWeight: '600',
     color: '#FFFFFF',
     marginBottom: 2,
   },
-  appointmentClient: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#FFFFFF',
-  },
   appointmentService: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#FFFFFF',
-    opacity: 0.8,
+    opacity: 0.9,
+    marginBottom: 2,
   },
   appointmentPrice: {
     fontSize: 12,
     color: '#FFFFFF',
-    fontWeight: '500',
-    marginTop: 2,
+    fontWeight: '600',
   },
   monthContainer: {
     flex: 1,
@@ -1184,5 +1354,108 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  appointmentContent: {
+    flex: 1,
+    padding: 4,
+  },
+  appointmentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  monthDayAppointments: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  monthAppointmentDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginHorizontal: 1,
+  },
+  moreAppointments: {
+    fontSize: 10,
+    color: '#666666',
+    marginLeft: 2,
+  },
+  monthItemTime: {
+    fontSize: 12,
+    color: '#666666',
+    marginBottom: 2,
+  },
+  monthItemClient: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333333',
+    marginBottom: 2,
+  },
+  monthItemService: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  monthItemPrice: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FF5722',
+    marginTop: 2,
+  },
+  calendarContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  calendar: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  appointmentsList: {
+    flex: 1,
+    marginTop: 8,
+  },
+  selectedDayAppointments: {
+    flex: 1,
+    padding: 16,
+  },
+  weekCalendar: {
+    paddingBottom: 0,
+    height: 100,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  weekViewScrollContent: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  timeGrid: {
+    flexDirection: 'row',
+    flex: 1,
+    paddingTop: 8,
+  },
+  gridContainer: {
+    flex: 1,
+    position: 'relative',
+    borderLeftWidth: 1,
+    borderLeftColor: '#EEEEEE',
+  },
+  appointment: {
+    position: 'absolute',
+    borderRadius: 8,
+    overflow: 'hidden',
+    margin: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    minHeight: 60,
+    padding: 4,
   },
 });

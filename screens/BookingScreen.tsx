@@ -15,6 +15,7 @@ import { format } from 'date-fns';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
+import { showMessage } from '../../utils/showMessage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -41,40 +42,107 @@ interface Appointment {
   status: string;
 }
 
-export const BookingScreen = () => {
+type ServiceDetails = {
+  id: string;
+  name: string;
+  price: number;
+  duration: number;
+  professional_id: string;
+  category: Database['public']['Enums']['service_category'];
+};
+
+type ProfessionalDetails = {
+  id: string;
+  business_name: string;
+  first_name: string;
+  last_name: string;
+  address: {
+    address_line1: string;
+    address_line2: string | null;
+    city: string;
+    state: string;
+    postal_code: string;
+  } | null;
+  working_hours: {
+    [key: string]: {
+      isOpen: boolean;
+      openTime: string;
+      closeTime: string;
+    };
+  } | null;
+};
+
+type BookingDetails = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  status: Database['public']['Enums']['booking_status'];
+  notes: string | null;
+  customer_id: string;
+  professional_id: string;
+  service_id: string;
+};
+
+type BookingScreenProps = {
+  route: {
+    params: {
+      serviceDetails: ServiceDetails;
+      professionalDetails: ProfessionalDetails;
+      bookingDetails?: BookingDetails;
+      isRescheduling?: boolean;
+    };
+  };
+};
+
+export const BookingScreen = ({ route }: BookingScreenProps) => {
   const navigation = useNavigation();
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { user } = useAuth();
 
+  const { 
+    serviceDetails, 
+    professionalDetails, 
+    bookingDetails, 
+    isRescheduling 
+  } = route.params;
+
+  useEffect(() => {
+    if (isRescheduling && bookingDetails) {
+      setSelectedDate(new Date(bookingDetails.start_time));
+      
+      navigation.setOptions({
+        title: `Reschedule ${serviceDetails.name}`,
+        headerTitle: `Reschedule ${serviceDetails.name}`
+      });
+    }
+  }, [isRescheduling, bookingDetails]);
+
+  useEffect(() => {
+    if (professionalDetails.working_hours) {
+      setWorkingHours(professionalDetails.working_hours);
+    }
+  }, [professionalDetails]);
+
+  const handleSlotSelection = (date: Date, time: string) => {
+    const duration = serviceDetails.duration;
+    // ... rest of your slot selection logic
+  };
+
   useEffect(() => {
     fetchBookings();
-  }, [selectedDate]);
+  }, [selectedDate, professionalId]);
 
   const fetchBookings = async () => {
     try {
-      // First get the professional's data
-      const { data: profData, error: profError } = await supabase
-        .from('professionals')
-        .select('id')
-        .eq('user_id', user?.id)
-        .single();
-
-      if (profError) {
-        console.error('Error getting professional:', profError);
+      if (!professionalId) {
+        console.error('No professional ID provided');
         return;
       }
 
-      if (!profData?.id) {
-        console.error('No professional found');
-        return;
-      }
+      console.log('Fetching bookings for professional:', professionalId);
 
-      const professionalId = profData.id;
-      console.log('Professional ID:', professionalId);
-
-      // Get the start and end of the week
       const startOfWeek = new Date(selectedDate);
       startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
       startOfWeek.setHours(0, 0, 0, 0);
@@ -89,7 +157,6 @@ export const BookingScreen = () => {
         professionalId
       });
 
-      // Fetch existing bookings
       const { data: bookings, error: bookingsError } = await supabase
         .from('bookings')
         .select(`
@@ -105,7 +172,7 @@ export const BookingScreen = () => {
             phone_number,
             user_id
           ),
-          services:service_id (
+          service:service_id (
             id,
             name,
             duration,
@@ -116,8 +183,7 @@ export const BookingScreen = () => {
         .eq('professional_id', professionalId)
         .gte('start_time', startOfWeek.toISOString())
         .lte('start_time', endOfWeek.toISOString())
-        .neq('status', 'CANCELLED')
-        .order('start_time', { ascending: true });
+        .neq('status', 'CANCELLED');
 
       if (bookingsError) {
         console.error('Error fetching bookings:', bookingsError);
@@ -126,7 +192,6 @@ export const BookingScreen = () => {
 
       console.log('Found bookings:', bookings);
 
-      // Filter out any null or invalid bookings
       const validBookings = bookings?.filter(booking => 
         booking && 
         booking.start_time && 
@@ -140,6 +205,7 @@ export const BookingScreen = () => {
 
       console.log('Valid bookings for professional:', {
         professionalId,
+        serviceId,
         bookingsCount: validBookings.length,
         bookings: validBookings.map(b => ({
           id: b.id,
@@ -225,8 +291,7 @@ export const BookingScreen = () => {
     return slots;
   };
 
-  const handleSlotPress = (date: Date, time: string, isAvailable: boolean) => {
-    // Double-check availability at the time of press
+  const handleSlotPress = async (date: Date, time: string, isAvailable: boolean) => {
     if (!isTimeSlotAvailable(date, time)) {
       Alert.alert('Not Available', 'This time slot is already booked.');
       return;
@@ -236,11 +301,38 @@ export const BookingScreen = () => {
     const selectedDateTime = new Date(date);
     selectedDateTime.setHours(hours, minutes, 0, 0);
 
-    // Navigate to booking confirmation with the selected time
-    navigation.navigate('BookingConfirmation', {
-      selectedTime: selectedDateTime.toISOString(),
-      duration: 30 // Default duration in minutes
-    });
+    if (isRescheduling && originalBookingId) {
+      try {
+        const { error } = await supabase
+          .from('bookings')
+          .update({ 
+            start_time: selectedDateTime.toISOString(),
+            end_time: new Date(selectedDateTime.getTime() + 30 * 60000).toISOString(),
+            service_id: serviceId
+          })
+          .eq('id', originalBookingId);
+
+        if (error) throw error;
+
+        showMessage({
+          message: "Booking rescheduled successfully",
+          type: "success"
+        });
+
+        navigation.goBack();
+      } catch (error) {
+        console.error('Error rescheduling booking:', error);
+        Alert.alert('Error', 'Failed to reschedule booking. Please try again.');
+      }
+    } else {
+      // Handle normal booking flow
+      navigation.navigate('BookingConfirmation', {
+        selectedTime: selectedDateTime.toISOString(),
+        duration: 30,
+        professionalId,
+        serviceId
+      });
+    }
   };
 
   const renderViewModeSelector = () => (

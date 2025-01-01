@@ -123,13 +123,6 @@ export const CustomerSettingsScreen = () => {
       title: 'Support',
       items: [
         {
-          id: 'help',
-          icon: 'help-circle',
-          label: 'Help Center',
-          type: 'navigation',
-          screen: 'HelpCentre',
-        },
-        {
           id: 'privacy',
           icon: 'shield-check',
           label: 'Privacy Policy',

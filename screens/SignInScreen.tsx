@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const SignInScreen = () => {
   const [email, setEmail] = useState('');
@@ -20,6 +21,32 @@ const SignInScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigation = useNavigation();
   const { signIn } = useAuth();
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      Alert.alert('Error', 'Please enter your email address');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'prim://auth/reset-password',
+      });
+
+      if (error) throw error;
+
+      Alert.alert(
+        'Password Reset',
+        'Check your email for password reset instructions.',
+        [{ text: 'OK' }]
+      );
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -29,7 +56,11 @@ const SignInScreen = () => {
 
     setIsLoading(true);
     try {
-      const { error } = await signIn(email, password);
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
       if (error) throw error;
       
       // Navigation will be handled by the auth state change in AuthContext
@@ -38,10 +69,6 @@ const SignInScreen = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleForgotPassword = () => {
-    navigation.navigate('ForgotPassword');
   };
 
   return (

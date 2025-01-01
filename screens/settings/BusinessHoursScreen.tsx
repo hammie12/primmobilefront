@@ -63,23 +63,49 @@ export const BusinessHoursScreen = () => {
   }, [user]);
 
   const fetchBusinessHours = async () => {
+    if (!user) return;
+    
     try {
-      const { data: business, error } = await supabase
+      // First try to get the business
+      let { data: business, error: businessError } = await supabase
         .from('businesses')
-        .select('business_hours')
-        .eq('owner_id', user?.id)
+        .select('id, business_hours')
+        .eq('owner_id', user.id)
         .single();
 
-      if (error) throw error;
+      if (businessError) {
+        // If no business exists, create one with default hours
+        if (businessError.code === 'PGRST116') {
+          const { data: newBusiness, error: createError } = await supabase
+            .from('businesses')
+            .insert([
+              {
+                owner_id: user.id,
+                business_hours: schedule,
+                name: 'My Business', // Only include required fields
+                status: 'active'
+              }
+            ])
+            .select('id, business_hours')
+            .single();
+
+          if (createError) throw createError;
+          business = newBusiness;
+        } else {
+          throw businessError;
+        }
+      }
 
       if (business?.business_hours) {
         setSchedule(business.business_hours);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching business hours:', error);
-      if (error.message !== 'Network request failed') {
-        Alert.alert('Error', 'Failed to load business hours');
-      }
+      // More detailed error message
+      const errorMessage = error.code === 'PGRST204' 
+        ? 'Database schema error. Please contact support.'
+        : 'Failed to load business hours. Please try again.';
+      Alert.alert('Error', errorMessage);
     }
   };
 
@@ -105,23 +131,41 @@ export const BusinessHoursScreen = () => {
         }
       }
 
-      // First, get the business ID for the professional
-      const { data: business, error: businessError } = await supabase
+      // First, get or create the business
+      let { data: business, error: businessError } = await supabase
         .from('businesses')
         .select('id')
         .eq('owner_id', user.id)
         .single();
 
       if (businessError) {
-        console.error('Error fetching business:', businessError);
-        throw new Error('Failed to fetch business details');
+        if (businessError.code === 'PGRST116') {
+          // Create new business if it doesn't exist
+          const { data: newBusiness, error: createError } = await supabase
+            .from('businesses')
+            .insert([
+              {
+                owner_id: user.id,
+                business_hours: schedule,
+                name: 'My Business',
+                status: 'active'
+              }
+            ])
+            .select('id')
+            .single();
+
+          if (createError) throw createError;
+          business = newBusiness;
+        } else {
+          throw businessError;
+        }
       }
 
       if (!business) {
         throw new Error('No business found for this user');
       }
 
-      // Update the business hours in the businesses table
+      // Update the business hours
       const { error: updateError } = await supabase
         .from('businesses')
         .update({ business_hours: schedule })

@@ -8,6 +8,7 @@ import { StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { StripeProvider } from './lib/stripe-provider';
+import FlashMessage from "react-native-flash-message";
 
 // Auth Screens
 import { WelcomeScreen } from './screens/WelcomeScreen';
@@ -304,6 +305,7 @@ const Navigation = () => {
           </>
         )}
       </Stack.Navigator>
+      <FlashMessage position="top" />
     </NavigationContainer>
   );
 };

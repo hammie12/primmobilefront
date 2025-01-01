@@ -59,26 +59,64 @@ const SignUpScreen = () => {
     console.log('[SignUpScreen] Starting signup with role:', formData.role);
 
     setIsLoading(true);
-    // For development, automatically format test emails
-    let email = formData.email;
-    if (__DEV__ && !email.includes('@supabase.co')) {
-      // Convert any test email to the correct format
-      const localPart = email.split('@')[0];
-      email = `test+${localPart}@supabase.co`;
-    }
+    try {
+      // For development, automatically format test emails
+      let email = formData.email;
+      if (__DEV__ && !email.includes('@supabase.co')) {
+        const localPart = email.split('@')[0];
+        email = `test+${localPart}@supabase.co`;
+      }
 
-    const { error } = await signUp({
-      email,
-      password: formData.password,
-      role: formData.role,
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      businessName: formData.role === 'PROFESSIONAL' ? formData.businessName : undefined,
-    });
+      // Sign up the user with Supabase
+      const { error: signUpError } = await supabase.auth.signUp({
+        email,
+        password: formData.password,
+        options: {
+          data: {
+            role: formData.role,
+            first_name: formData.firstName,
+            last_name: formData.lastName,
+            business_name: formData.role === 'PROFESSIONAL' ? formData.businessName : undefined,
+          },
+          emailRedirectTo: 'prim://auth/callback',
+        },
+      });
 
-    setIsLoading(false);
+      if (signUpError) throw signUpError;
 
-    if (error) {
+      console.log('[SignUpScreen] Signup successful');
+
+      Alert.alert(
+        'Success',
+        'Account created successfully! Please check your email for verification.',
+        [
+          {
+            text: 'OK',
+            onPress: async () => {
+              // Get the current session to check the role
+              const { data: { session } } = await supabase.auth.getSession();
+              const userRole = session?.user?.user_metadata?.role;
+              
+              console.log('[SignUpScreen] Current form role:', formData.role);
+              console.log('[SignUpScreen] Session metadata:', session?.user?.user_metadata);
+              console.log('[SignUpScreen] Navigating with role:', userRole);
+              
+              // Use formData.role as a fallback if metadata isn't available yet
+              const finalRole = userRole || formData.role;
+              console.log('[SignUpScreen] Final role used:', finalRole);
+              
+              if (finalRole === 'CUSTOMER') {
+                console.log('[SignUpScreen] Navigating to CustomerTabs');
+                navigation.replace('CustomerTabs');
+              } else {
+                console.log('[SignUpScreen] Navigating to Home');
+                navigation.replace('Home');
+              }
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
       console.log('[SignUpScreen] Signup error:', error);
       if (error.message?.includes('email_address_invalid')) {
         Alert.alert(
@@ -93,41 +131,9 @@ const SignUpScreen = () => {
       } else {
         Alert.alert('Error', error.message || 'Failed to create account');
       }
-      return;
+    } finally {
+      setIsLoading(false);
     }
-
-    console.log('[SignUpScreen] Signup successful');
-
-    Alert.alert(
-      'Success',
-      'Account created successfully!',
-      [
-        {
-          text: 'OK',
-          onPress: async () => {
-            // Get the current session to check the role
-            const { data: { session } } = await supabase.auth.getSession();
-            const userRole = session?.user?.user_metadata?.role;
-            
-            console.log('[SignUpScreen] Current form role:', formData.role);
-            console.log('[SignUpScreen] Session metadata:', session?.user?.user_metadata);
-            console.log('[SignUpScreen] Navigating with role:', userRole);
-            
-            // Use formData.role as a fallback if metadata isn't available yet
-            const finalRole = userRole || formData.role;
-            console.log('[SignUpScreen] Final role used:', finalRole);
-            
-            if (finalRole === 'CUSTOMER') {
-              console.log('[SignUpScreen] Navigating to CustomerTabs');
-              navigation.replace('CustomerTabs');
-            } else {
-              console.log('[SignUpScreen] Navigating to Home');
-              navigation.replace('Home');
-            }
-          },
-        },
-      ]
-    );
   };
 
   return (

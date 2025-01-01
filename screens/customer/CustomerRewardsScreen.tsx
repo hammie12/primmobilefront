@@ -61,6 +61,25 @@ export const CustomerRewardsScreen = () => {
 
       if (customerError) throw customerError;
 
+      // Get total amount spent from confirmed bookings
+      const { data: totalSpentData, error: spentError } = await supabase
+        .from('bookings')
+        .select(`
+          services (
+            price
+          )
+        `)
+        .eq('customer_id', customerProfile.id)
+        .eq('status', 'CONFIRMED');
+
+      if (spentError) {
+        console.error('Error fetching total spent:', spentError);
+      }
+
+      // Calculate total spent
+      const totalSpent = totalSpentData?.reduce((sum, booking) => 
+        sum + (booking.services?.price || 0), 0) || 0;
+
       // Get rewards profile
       const { data: rewardsProfile, error: rewardsError } = await supabase
         .from('rewards_profiles')
@@ -72,10 +91,10 @@ export const CustomerRewardsScreen = () => {
         console.error('Rewards error:', rewardsError);
       }
 
-      // Set user rewards from rewards profile
+      // Set user rewards from rewards profile and total spent
       setUserRewards({
-        total_points: rewardsProfile?.points || 0,
-        bookings_count: 0 // This will be updated from bookings count
+        total_points: totalSpent, // Set points equal to total spent
+        bookings_count: 0
       });
 
       // Fetch recent bookings
@@ -110,12 +129,13 @@ export const CustomerRewardsScreen = () => {
       const transformedActivities = (bookings || []).map(booking => ({
         id: booking.id,
         type: 'earned' as const,
-        points: Math.floor((booking.services?.price || 0) / 10), // 1 point per £10 spent
+        points: booking.services?.price || 0, // Changed to 1 point per £1 spent
         description: `Booking with ${booking.professional_profiles?.business_name}`,
         created_at: booking.start_time,
         service_name: booking.services?.name || 'Service',
         business_name: booking.professional_profiles?.business_name || 'Business',
-        amount: booking.services?.price || 0
+        amount: booking.services?.price || 0,
+        user_id: user.id // Add missing user_id field
       }));
 
       console.log('Transformed activities:', transformedActivities);
@@ -154,7 +174,7 @@ export const CustomerRewardsScreen = () => {
           <View style={styles.nextTierContainer}>
             <Typography variant="caption" style={styles.nextTierLabel}>Progress to Reward</Typography>
             <Typography variant="body1" style={styles.nextTierText}>
-              {userRewards.bookings_count}/{BOOKINGS_NEEDED} Bookings
+              {userRewards.total_points}/{POINTS_FOR_DISCOUNT} points
             </Typography>
             <Typography variant="caption" style={styles.pointsToNext}>
               {POINTS_FOR_DISCOUNT - userRewards.total_points} points to 20% discount
@@ -165,7 +185,7 @@ export const CustomerRewardsScreen = () => {
               <View 
                 style={[
                   styles.progressFill, 
-                  { width: `${(userRewards.total_points / POINTS_FOR_DISCOUNT) * 100}%` }
+                  { width: `${Math.min((userRewards.total_points / POINTS_FOR_DISCOUNT) * 100, 100)}%` }
                 ]} 
               />
             </View>
@@ -193,10 +213,10 @@ export const CustomerRewardsScreen = () => {
         <View style={styles.rewardInfo}>
           <Typography variant="body1" style={styles.rewardName}>20% Discount on Next Appointment</Typography>
           <Typography variant="caption" style={styles.rewardDescription}>
-            Redeem 250 PriimPoints for a 20% discount on your next appointment
+            Spend £250 to earn a 20% discount on your next appointment
           </Typography>
           <Typography variant="caption" style={[styles.rewardDescription, styles.rewardNote]}>
-            Complete 5 bookings of £50 each to earn 250 PriimPoints
+            Every £1 spent earns you 1 point towards your reward
           </Typography>
         </View>
         <View style={styles.rewardPoints}>

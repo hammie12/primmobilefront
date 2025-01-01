@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PrimMobile",
+    "name": "Your App Name",
     "slug": "PrimMobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -17,8 +17,7 @@
         "NSLocationWhenInUseUsageDescription": "This app needs access to location to show nearby services.",
         "NSLocationAlwaysUsageDescription": "This app needs access to location to show nearby services."
       },
-      "bundleIdentifier": "com.yourcompany.yourappname",
-      "buildNumber": "1.0.0"
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +27,9 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
-      ]
+      ],
+      "package": "com.yourcompany.appname",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation, NavigationProp, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, NavigationProp, useFocusEffect, useRoute } from '@react-navigation/native';
 import { BusinessTopBar } from '../components/BusinessTopBar';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -127,6 +127,23 @@ export const ProfessionalProfileScreen = () => {
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
 
+  const route = useRoute();
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Replace the previous scroll useEffect with this simpler version
+  useEffect(() => {
+    const params = route.params as { scrollTo?: 'businessHours' | 'services' };
+    if (params?.scrollTo) {
+      // Add a small delay to ensure the view has rendered
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ 
+          y: params.scrollTo === 'businessHours' ? 1000 : 800, // Different positions for different sections
+          animated: true 
+        });
+      }, 300);
+    }
+  }, [route.params]);
+
   useEffect(() => {
     fetchProfileData();
   }, [user, session]);
@@ -227,9 +244,29 @@ export const ProfessionalProfileScreen = () => {
     }
 
     try {
-      // Log the address data before saving to verify structure
-      console.log('Address being saved:', profileData.address);
+      // First, ensure the user exists in the users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', user.id)
+        .single();
 
+      if (userError || !userData) {
+        // If user doesn't exist, create it
+        const { error: createUserError } = await supabase
+          .from('users')
+          .insert([
+            {
+              id: user.id,
+              email: session.user.email,
+              role: session.user.user_metadata.role,
+            }
+          ]);
+
+        if (createUserError) throw createUserError;
+      }
+
+      // Now proceed with saving the professional profile
       const updatedProfile = {
         user_id: user.id,
         name: `${session.user.user_metadata.first_name} ${session.user.user_metadata.last_name}`,
@@ -237,7 +274,6 @@ export const ProfessionalProfileScreen = () => {
         category: profileData.category || '',
         business_name: session.user.user_metadata.business_name || '',
         about: profileData.about || '',
-        // Ensure address is properly structured as JSONB for Supabase
         address: JSON.stringify({
           postcode: profileData.address.postcode,
           address_line_1: profileData.address.address_line_1,
@@ -261,11 +297,21 @@ export const ProfessionalProfileScreen = () => {
 
       if (checkError) throw checkError;
 
-      const result = await supabase
-        .from('professionals')
-        [existingProfile ? 'update' : 'insert'](updatedProfile)
-        .eq(existingProfile ? 'user_id' : '', existingProfile ? user.id : '')
-        .select();
+      let result;
+      if (existingProfile) {
+        // Update existing profile
+        result = await supabase
+          .from('professionals')
+          .update(updatedProfile)
+          .eq('user_id', user.id)
+          .select();
+      } else {
+        // Insert new profile
+        result = await supabase
+          .from('professionals')
+          .insert([updatedProfile])
+          .select();
+      }
 
       if (result.error) throw result.error;
 
@@ -804,7 +850,10 @@ export const ProfessionalProfileScreen = () => {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
       <BusinessTopBar />
-      <ScrollView style={styles.scrollView}>
+      <ScrollView 
+        ref={scrollViewRef}
+        style={styles.scrollView}
+      >
         {/* Banner */}
         <TouchableOpacity onPress={() => handleImagePick('banner')} style={styles.bannerContainer}>
           {profileData.bannerImage ? (
@@ -862,7 +911,9 @@ export const ProfessionalProfileScreen = () => {
         </View>
 
         {/* Business Hours */}
-        {renderBusinessHours()}
+        <View>
+          {renderBusinessHours()}
+        </View>
       </ScrollView>
 
       {/* Service Edit Modal */}
@@ -1221,16 +1272,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   businessName: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     color: '#333333',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   category: {
     fontSize: 16,
     color: '#FF5722',
-    fontWeight: '500',
-    marginBottom: 4,
+    fontWeight: '600',
+    marginBottom: 6,
   },
   stats: {
     flexDirection: 'row',
@@ -1269,106 +1320,133 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#333333',
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FF5722',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    marginLeft: 4,
-  },
-  editButton: {
-    padding: 8,
-  },
-  serviceCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 25,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
+  addButtonText: {
+    color: '#FFFFFF',
+    marginLeft: 8,
+    fontWeight: '600',
+  },
+  editButton: {
+    padding: 8,
+  },
+  serviceCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   serviceName: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#333333',
   },
   serviceActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 16,
   },
   serviceDescription: {
     fontSize: 14,
     color: '#666666',
-    marginBottom: 12,
+    marginVertical: 12,
+    lineHeight: 20,
   },
   serviceDetails: {
     flexDirection: 'row',
     gap: 16,
+    marginBottom: 16,
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    borderRadius: 12,
   },
   serviceDetail: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 8,
   },
   serviceDetailText: {
     fontSize: 14,
-    color: '#666666',
+    color: '#333333',
+    fontWeight: '500',
   },
   hourRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
   },
   dayText: {
     fontSize: 16,
     color: '#333333',
+    fontWeight: '500',
   },
   hoursText: {
     fontSize: 16,
     color: '#666666',
+    fontWeight: '500',
   },
   editForm: {
-    gap: 16,
+    gap: 20,
   },
   input: {
     borderWidth: 1,
     borderColor: '#EEEEEE',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
+    backgroundColor: '#FFFFFF',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   textArea: {
-    height: 100,
+    height: 120,
     textAlignVertical: 'top',
   },
   saveButton: {
     backgroundColor: '#FF5722',
-    padding: 12,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 12,
     alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
   },
   saveButtonText: {
     color: '#FFFFFF',
@@ -1378,31 +1456,43 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    padding: 20,
+    justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    maxHeight: '90%',
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333333',
+    marginBottom: 20,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 12,
-    marginTop: 16,
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
   },
   modalButton: {
-    padding: 12,
+    padding: 16,
+    borderRadius: 12,
+    minWidth: 100,
+    alignItems: 'center',
   },
   modalButtonPrimary: {
     backgroundColor: '#FF5722',
-    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   modalButtonText: {
     color: '#666666',
@@ -1423,21 +1513,26 @@ const styles = StyleSheet.create({
   ...additionalStyles,
   ...additionalCardStyles,
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#333333',
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
     borderColor: '#EEEEEE',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
     backgroundColor: '#FFFFFF',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   pickerContainer: undefined,
   serviceCategory: {
@@ -1446,18 +1541,22 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   contactInfo: {
-    marginTop: 12,
-    gap: 8,
+    marginTop: 16,
+    backgroundColor: '#F8F9FA',
+    padding: 16,
+    borderRadius: 16,
+    gap: 12,
   },
   contactItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    alignItems: 'flex-start',
+    gap: 12,
   },
   contactText: {
     fontSize: 14,
-    color: '#666666',
+    color: '#333333',
     flex: 1,
+    lineHeight: 20,
   },
   addressHint: {
     color: '#666666',
@@ -1499,17 +1598,22 @@ const styles = StyleSheet.create({
   categoryButtonsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   categoryButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    borderWidth: 2,
     borderColor: '#EEEEEE',
     backgroundColor: '#FFFFFF',
-    minWidth: 80,
+    minWidth: 100,
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   categoryButtonSelected: {
     backgroundColor: '#FF5722',
@@ -1518,9 +1622,10 @@ const styles = StyleSheet.create({
   categoryButtonText: {
     fontSize: 14,
     color: '#666666',
+    fontWeight: '600',
   },
   categoryButtonTextSelected: {
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontWeight: '600',
   },
 });

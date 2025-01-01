@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   ScrollView,
@@ -7,6 +7,8 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  findNodeHandle,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -15,9 +17,11 @@ import { Typography } from '../../components/Typography';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { format } from 'date-fns';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
+import { showMessage } from 'react-native-flash-message';
+import Modal from 'react-native-modal';
 
 const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=0D8ABC&color=fff';
 
@@ -40,6 +44,8 @@ type Booking = {
   service: {
     id: string;
     name: string;
+    price: number;
+    duration: number;
   } | null;
   start_time: string;
   end_time: string;
@@ -47,12 +53,267 @@ type Booking = {
   notes: string | null;
 };
 
-export const CustomerBookingsScreen = () => {
+type ActionCardProps = {
+  isVisible: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText: string;
+  confirmColor?: string;
+};
+
+const ActionCard = ({
+  isVisible,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText,
+  confirmColor = '#FF5722'
+}: ActionCardProps) => (
+  <Modal
+    isVisible={isVisible}
+    onBackdropPress={onClose}
+    onBackButtonPress={onClose}
+    backdropOpacity={0.5}
+    style={styles.modalContainer}
+  >
+    <View style={styles.actionCard}>
+      <Typography variant="h2" style={styles.actionCardTitle}>
+        {title}
+      </Typography>
+      <Typography variant="body1" style={styles.actionCardMessage}>
+        {message}
+      </Typography>
+      <View style={styles.actionCardButtons}>
+        <TouchableOpacity 
+          style={[styles.actionCardButton, styles.cancelActionButton]} 
+          onPress={onClose}
+        >
+          <Typography variant="body1" style={styles.cancelActionButtonText}>
+            Cancel
+          </Typography>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.actionCardButton, { backgroundColor: confirmColor }]} 
+          onPress={onConfirm}
+        >
+          <Typography variant="body1" style={styles.confirmActionButtonText}>
+            {confirmText}
+          </Typography>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+);
+
+// Add these types to define our data structure
+type ServiceDetails = {
+  id: string;
+  name: string;
+  price: number;
+  duration: number;
+  professional_id: string;
+  category: Database['public']['Enums']['service_category'];
+};
+
+type ProfessionalDetails = {
+  id: string;
+  business_name: string;
+  first_name: string;
+  last_name: string;
+  addresses: {
+    address_line1: string;
+    address_line2: string | null;
+    city: string;
+    state: string;
+    postal_code: string;
+  }[] | null;
+};
+
+type BookingDetails = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  status: Database['public']['Enums']['booking_status'];
+  notes: string | null;
+};
+
+export const CustomerBookingsScreen = ({ route }: { route: any }) => {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRescheduleModalVisible, setIsRescheduleModalVisible] = useState(false);
+  const [isCancelModalVisible, setCancelModalVisible] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const { user } = useAuth();
+  const navigation = useNavigation<any>();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const bookingRefs = useRef<{ [key: string]: any }>({});
+
+  const handleRescheduleBooking = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setIsRescheduleModalVisible(true);
+  };
+
+  const confirmReschedule = async () => {
+    if (selectedBooking && selectedBooking.service) {
+      try {
+        console.log('Selected Booking Data:', {
+          booking: selectedBooking,
+          professionalProfiles: selectedBooking.professional_profiles,
+          service: selectedBooking.service,
+          professionalId: selectedBooking.professional_profiles.id
+        });
+
+        const professionalId = selectedBooking.professional_profiles.id;
+        console.log('Fetching business hours for professional:', professionalId);
+
+        // Log the full booking data to see all available IDs
+        console.log('Full booking data:', JSON.stringify(selectedBooking, null, 2));
+
+        // Direct fetch from professionals table like CustomerViewProfessionalScreen
+        const { data: profile, error } = await supabase
+          .from('professionals')
+          .select('*, business_hours')
+          .eq('id', professionalId)
+          .single();
+
+        if (error) {
+          console.log('Error fetching professional profile, using default hours:', {
+            error,
+            professionalId,
+            bookingData: selectedBooking
+          });
+        }
+
+        // Default business hours structure
+        const defaultHours = {
+          Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Saturday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+          Sunday: { isOpen: false, openTime: '09:00', closeTime: '17:00' }
+        };
+
+        // Use business hours from profile or default if not found
+        const businessHours = profile?.business_hours || defaultHours;
+
+        console.log('Business hours configuration:', {
+          usingDefault: !profile?.business_hours,
+          hours: businessHours
+        });
+
+        // Navigate to BookingScreen with all required data
+        navigation.navigate('Booking', {
+          professionalId: selectedBooking.professional_profiles.id,
+          serviceName: selectedBooking.service.name,
+          servicePrice: selectedBooking.service.price,
+          serviceDuration: selectedBooking.service.duration.toString(),
+          professionalName: selectedBooking.professional_profiles.business_name,
+          serviceId: selectedBooking.service.id,
+          workingHours: businessHours
+        });
+
+        setIsRescheduleModalVisible(false);
+      } catch (error) {
+        console.log('Error in reschedule process, using default hours:', error);
+        
+        // Use default hours if there's an error
+        const defaultHours = {
+          Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+          Saturday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+          Sunday: { isOpen: false, openTime: '09:00', closeTime: '17:00' }
+        };
+
+        navigation.navigate('Booking', {
+          professionalId: selectedBooking.professional_profiles.id,
+          serviceName: selectedBooking.service.name,
+          servicePrice: selectedBooking.service.price,
+          serviceDuration: selectedBooking.service.duration.toString(),
+          professionalName: selectedBooking.professional_profiles.business_name,
+          serviceId: selectedBooking.service.id,
+          workingHours: defaultHours
+        });
+
+        setIsRescheduleModalVisible(false);
+        
+        showMessage({
+          message: "Using default business hours",
+          type: "info",
+          description: "Proceeding with standard business hours."
+        });
+      }
+    }
+  };
+
+  const handleCancelBooking = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setCancelModalVisible(true);
+  };
+
+  const confirmCancel = async () => {
+    if (selectedBooking) {
+      try {
+        const { error } = await supabase
+          .from('bookings')
+          .delete()
+          .eq('id', selectedBooking.id);
+
+        if (error) throw error;
+
+        showMessage({
+          message: "Booking cancelled successfully",
+          type: "success",
+          description: "Your booking has been cancelled. Please note that deposits are non-refundable."
+        });
+
+        // Refresh bookings list
+        fetchBookings();
+      } catch (error) {
+        console.error('Error cancelling booking:', error);
+        showMessage({
+          message: "Failed to cancel booking",
+          type: "danger",
+        });
+      }
+    }
+    setCancelModalVisible(false);
+  };
+
+  useEffect(() => {
+    // Set initial tab based on route params
+    if (route.params?.initialTab) {
+      setActiveTab(route.params.initialTab);
+    }
+  }, [route.params?.initialTab]);
+
+  useEffect(() => {
+    // Scroll to selected booking after bookings are loaded
+    if (!isLoading && route.params?.selectedBookingId && bookings.length > 0) {
+      const selectedBooking = bookings.find(b => b.id === route.params.selectedBookingId);
+      if (selectedBooking) {
+        const selectedRef = bookingRefs.current[selectedBooking.id];
+        if (selectedRef) {
+          const node = findNodeHandle(selectedRef);
+          if (node && scrollViewRef.current) {
+            scrollViewRef.current.scrollTo({
+              y: node,
+              animated: true
+            });
+          }
+        }
+      }
+    }
+  }, [isLoading, bookings, route.params?.selectedBookingId]);
 
   const fetchBookings = async () => {
     try {
@@ -64,11 +325,16 @@ export const CustomerBookingsScreen = () => {
       const now = new Date().toISOString();
       console.log('Fetching bookings at:', now);
       
-      const { data: customerProfile } = await supabase
+      const { data: customerProfile, error: customerError } = await supabase
         .from('customer_profiles')
         .select('id')
         .eq('user_id', user.id)
         .single();
+
+      if (customerError) {
+        console.error('Error fetching customer profile:', customerError);
+        return;
+      }
 
       if (!customerProfile) {
         console.log('No customer profile found');
@@ -78,7 +344,7 @@ export const CustomerBookingsScreen = () => {
       console.log('Fetching bookings for customer:', customerProfile.id);
       console.log('Active tab:', activeTab);
 
-      const { data, error } = await supabase
+      const query = supabase
         .from('bookings')
         .select(`
           id,
@@ -95,14 +361,28 @@ export const CustomerBookingsScreen = () => {
           ),
           service:service_id (
             id,
-            name
+            name,
+            price,
+            duration,
+            professional_id
           )
         `)
-        .eq('customer_id', customerProfile.id)
-        .in('status', activeTab === 'upcoming' ? ['CONFIRMED', 'PENDING'] : ['COMPLETED'])
-        .gte('start_time', activeTab === 'upcoming' ? now : '1900-01-01')
-        .lt('start_time', activeTab === 'upcoming' ? '2100-01-01' : now)
-        .order('start_time', { ascending: activeTab === 'upcoming' });
+        .eq('customer_id', customerProfile.id);
+
+      // Add conditions based on active tab
+      if (activeTab === 'upcoming') {
+        query
+          .in('status', ['CONFIRMED', 'PENDING'])
+          .gte('start_time', now)
+          .order('start_time', { ascending: true });
+      } else {
+        query
+          .eq('status', 'COMPLETED')
+          .lt('start_time', now)
+          .order('start_time', { ascending: false });
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Error fetching bookings:', error);
@@ -111,9 +391,17 @@ export const CustomerBookingsScreen = () => {
 
       console.log('Raw bookings data:', data);
       
-      // Only filter based on professional_profiles
-      const validBookings = (data || []).filter(
-        booking => booking.professional_profiles
+      if (!data || data.length === 0) {
+        console.log('No bookings found');
+        setBookings([]);
+        return;
+      }
+
+      // Filter out any bookings without professional profiles
+      const validBookings = data.filter(booking => 
+        booking.professional_profiles && 
+        booking.professional_profiles.business_name &&
+        booking.service
       );
       
       console.log('Valid bookings after filter:', validBookings);
@@ -124,18 +412,24 @@ export const CustomerBookingsScreen = () => {
         professional_profiles: booking.professional_profiles,
         service: booking.service || {
           id: 'unknown',
-          name: booking.notes?.replace('Service: ', '') || 'Service Unavailable'
+          name: booking.notes?.replace('Service: ', '') || 'Service Unavailable',
+          price: 0,
+          duration: 30,
+          professional_id: booking.professional_profiles.id
         }
-      })) as unknown as Booking[];  // Use double type assertion to fix type error
+      }));
 
       console.log('Formatted bookings:', formattedBookings);
       setBookings(formattedBookings);
     } catch (error) {
       console.error('Error in fetchBookings:', error);
+      setBookings([]); // Set empty array on error
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Update useFocusEffect to properly handle cleanup and refresh
+  // Update useFocusEffect to handle animations better
   useFocusEffect(
     React.useCallback(() => {
       console.log('Screen focused - fetching bookings');
@@ -143,8 +437,10 @@ export const CustomerBookingsScreen = () => {
 
       const loadBookings = async () => {
         try {
-          setIsLoading(true);
-          await fetchBookings();
+          if (isActive) {
+            setIsLoading(true);
+            await fetchBookings();
+          }
         } finally {
           if (isActive) {
             setIsLoading(false);
@@ -152,11 +448,15 @@ export const CustomerBookingsScreen = () => {
         }
       };
 
-      loadBookings();
+      // Small delay to ensure smooth animation
+      const timer = setTimeout(() => {
+        loadBookings();
+      }, 100);
 
       return () => {
         console.log('Screen unfocused - cleanup');
         isActive = false;
+        clearTimeout(timer);
       };
     }, [activeTab, user])
   );
@@ -182,7 +482,7 @@ export const CustomerBookingsScreen = () => {
           variant="body1"
           style={[
             styles.tabText,
-            activeTab === 'upcoming' && styles.activeTabText
+            activeTab === 'upcoming' ? styles.activeTabText : {}
           ]}
         >
           Upcoming
@@ -196,7 +496,7 @@ export const CustomerBookingsScreen = () => {
           variant="body1"
           style={[
             styles.tabText,
-            activeTab === 'past' && styles.activeTabText
+            activeTab === 'past' ? styles.activeTabText : {}
           ]}
         >
           Past
@@ -209,13 +509,22 @@ export const CustomerBookingsScreen = () => {
     const startTime = new Date(booking.start_time);
     const endTime = new Date(booking.end_time);
 
+    const handleProfessionalPress = () => {
+      navigation.navigate('CustomerViewProfessional', {
+        professionalId: booking.professional_profiles.id,
+        name: booking.professional_profiles.business_name,
+      });
+    };
+
     return (
-      <Animated.View
-        entering={FadeInDown.delay(index * 100).springify()}
+      <View
         style={styles.bookingCard}
         key={booking.id}
       >
-        <View style={styles.bookingHeader}>
+        <TouchableOpacity 
+          style={styles.bookingHeader}
+          onPress={handleProfessionalPress}
+        >
           <Image
             source={{ 
               uri: booking.professional_profile.profile_image || DEFAULT_AVATAR
@@ -228,19 +537,31 @@ export const CustomerBookingsScreen = () => {
               {booking.professional_profile.business_name || 
                 `${booking.professional_profile.first_name} ${booking.professional_profile.last_name}`}
             </Typography>
-            <View style={styles.serviceContainer}>
-              <MaterialCommunityIcons 
-                name="content-cut" 
-                size={16} 
-                color="#FF5722" 
-              />
-              <Typography variant="caption" style={styles.serviceType}>
-                {booking.service?.name || 'Service Unavailable'}
-              </Typography>
+            <View style={styles.serviceDetailsContainer}>
+              <View style={styles.serviceContainer}>
+                <MaterialCommunityIcons 
+                  name="content-cut" 
+                  size={16} 
+                  color="#FF5722" 
+                />
+                <Typography variant="caption" style={styles.serviceType}>
+                  {booking.service?.name || 'Service Unavailable'}
+                </Typography>
+              </View>
+              <View style={styles.timeContainer}>
+                <MaterialCommunityIcons 
+                  name="clock-outline" 
+                  size={16} 
+                  color="#FF5722" 
+                />
+                <Typography variant="caption" style={styles.timeText}>
+                  {format(startTime, 'h:mm a')} - {format(endTime, 'h:mm a')}
+                </Typography>
+              </View>
             </View>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={24} color="#FF5722" />
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.bookingDetails}>
           <View style={styles.detailRow}>
@@ -265,15 +586,27 @@ export const CustomerBookingsScreen = () => {
 
         {activeTab === 'upcoming' && (
           <View style={styles.bookingActions}>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleRescheduleBooking(booking)}
+            >
               <MaterialCommunityIcons name="calendar-edit" size={20} color="#FF5722" />
               <Typography variant="body2" style={styles.actionButtonText}>
                 Reschedule
               </Typography>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, styles.cancelButton]}>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.cancelButton]}
+              onPress={() => handleCancelBooking(booking)}
+            >
               <MaterialCommunityIcons name="calendar-remove" size={20} color="#FF3B30" />
-              <Typography variant="body2" style={[styles.actionButtonText, styles.cancelButtonText]}>
+              <Typography 
+                variant="body2" 
+                style={[
+                  styles.actionButtonText,
+                  styles.cancelButtonText
+                ]}
+              >
                 Cancel
               </Typography>
             </TouchableOpacity>
@@ -296,7 +629,7 @@ export const CustomerBookingsScreen = () => {
             </TouchableOpacity>
           </View>
         )}
-      </Animated.View>
+      </View>
     );
   };
 
@@ -315,29 +648,53 @@ export const CustomerBookingsScreen = () => {
       </LinearGradient>
       {renderTabs()}
       <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
+        ref={scrollViewRef}
+        style={styles.scrollView}
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
         }
       >
         {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#FF5722" />
-          </View>
+          <ActivityIndicator size="large" color="#FF5722" style={styles.loader} />
         ) : bookings.length > 0 ? (
-          <View style={styles.bookingsContainer}>
-            {bookings.map((booking, index) => renderBookingCard(booking, index))}
-          </View>
+          bookings.map((booking, index) => (
+            <TouchableOpacity
+              key={booking.id}
+              ref={ref => bookingRefs.current[booking.id] = ref}
+              style={[
+                styles.bookingCard,
+                route.params?.selectedBookingId === booking.id && styles.selectedBookingCard
+              ]}
+            >
+              {renderBookingCard(booking, index)}
+            </TouchableOpacity>
+          ))
         ) : (
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="calendar-blank" size={64} color="#CCC" />
-            <Typography variant="body1" style={styles.emptyText}>
+          <View style={styles.noBookingsContainer}>
+            <MaterialCommunityIcons name="calendar-blank" size={48} color="#CCC" />
+            <Typography variant="body1" style={styles.noBookingsText}>
               No {activeTab} bookings
             </Typography>
           </View>
         )}
       </ScrollView>
+      <ActionCard
+        isVisible={isRescheduleModalVisible}
+        onClose={() => setIsRescheduleModalVisible(false)}
+        onConfirm={confirmReschedule}
+        title="Reschedule Booking"
+        message="Would you like to reschedule this booking? You'll be able to select a new date and time."
+        confirmText="Reschedule"
+      />
+      <ActionCard
+        isVisible={isCancelModalVisible}
+        onClose={() => setCancelModalVisible(false)}
+        onConfirm={confirmCancel}
+        title="Cancel Booking"
+        message="Are you sure you want to cancel this booking? Please note that your deposit will not be refunded. This action cannot be undone."
+        confirmText="Yes, Cancel"
+        confirmColor="#FF3B30"
+      />
     </SafeAreaView>
   );
 };
@@ -498,14 +855,14 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: '#FF5722',
     fontWeight: '600',
-  },
+  } as const,
   cancelButton: {
     backgroundColor: '#FFE5E5',
     borderColor: '#FFD1D1',
   },
   cancelButtonText: {
     color: '#FF3B30',
-  },
+  } as const,
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -522,5 +879,89 @@ const styles = StyleSheet.create({
     marginTop: 16,
     color: '#666',
     textAlign: 'center',
+  },
+  serviceDetailsContainer: {
+    marginTop: 4,
+    gap: 8,
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  timeText: {
+    color: '#666',
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  selectedBookingCard: {
+    borderColor: '#FF5722',
+    borderWidth: 2,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noBookingsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  noBookingsText: {
+    marginTop: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  modalContainer: {
+    margin: 0,
+    justifyContent: 'flex-end',
+  },
+  actionCard: {
+    backgroundColor: 'white',
+    padding: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    minHeight: 200,
+  },
+  actionCardTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 16,
+    color: '#1A1A1A',
+  },
+  actionCardMessage: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  actionCardButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  actionCardButton: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelActionButton: {
+    backgroundColor: '#F5F5F5',
+  },
+  cancelActionButtonText: {
+    color: '#666',
+    fontWeight: '600',
+  },
+  confirmActionButtonText: {
+    color: 'white',
+    fontWeight: '600',
   },
 });
