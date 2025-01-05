@@ -74,7 +74,7 @@ type Service = {
   duration_hours: number;
   duration_minutes: number;
   duration_total_minutes: number;
-  price: number;
+  deposit_price: number;
   full_price: number;
   category: ServiceCategory;
   images: string[];
@@ -560,8 +560,8 @@ export const ProfessionalProfileScreen = () => {
       const service = {
         ...serviceData,
         professional_id: profile.id,
-        price: parseFloat(serviceData.price?.toString() || '0'),
         deposit_price: parseFloat(serviceData.deposit_price?.toString() || '0'),
+        full_price: parseFloat(serviceData.full_price?.toString() || '0'),
       };
 
       let result;
@@ -642,13 +642,23 @@ export const ProfessionalProfileScreen = () => {
             {service.duration_minutes}min
           </Text>
         </View>
-        <View style={styles.serviceDetail}>
-          <MaterialCommunityIcons name="cash" size={16} color="#666666" />
-          <Text style={styles.serviceDetailText}>£{service.full_price}</Text>
+        <View style={styles.priceContainer}>
+          <View style={styles.serviceDetail}>
+            <MaterialCommunityIcons name="cash" size={16} color="#666666" />
+            <Text style={styles.serviceDetailText}>Full Price: £{service.full_price}</Text>
+          </View>
+          <View style={styles.paymentNoteContainer}>
+            <Text style={styles.pricingNote}>Pay to service provider</Text>
+          </View>
         </View>
-        <View style={styles.serviceDetail}>
-          <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
-          <Text style={styles.serviceDetailText}>Deposit: £{service.price}</Text>
+        <View style={styles.priceContainer}>
+          <View style={styles.serviceDetail}>
+            <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
+            <Text style={styles.serviceDetailText}>Deposit: £{service.deposit_price}</Text>
+          </View>
+          <View style={styles.paymentNoteContainer}>
+            <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Prim</Text></Text>
+          </View>
         </View>
       </View>
     </View>
@@ -1111,10 +1121,9 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
   const [formData, setFormData] = useState({
     name: service?.name || '',
     description: service?.description || '',
-    // Update to use new duration fields
     hours: service?.duration_hours?.toString() || '0',
     minutes: service?.duration_minutes?.toString() || '0',
-    deposit_price: service?.price?.toString() || '',
+    deposit_price: service?.deposit_price?.toString() || '',
     full_price: service?.full_price?.toString() || '',
     category: service?.category || '',
     images: service?.images || [],
@@ -1148,7 +1157,7 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
       duration_hours: hours,
       duration_minutes: minutes,
       duration_total_minutes: totalMinutes,
-      price: parseFloat(formData.deposit_price) || 0,
+      deposit_price: parseFloat(formData.deposit_price) || 0,
       full_price: parseFloat(formData.full_price) || 0,
       category: formData.category,
       images: formData.images,
@@ -1626,12 +1635,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   serviceDetails: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 16,
     backgroundColor: '#F8F9FA',
-    padding: 12,
+    padding: 16,
     borderRadius: 12,
+    gap: 12,
   },
   serviceDetail: {
     flexDirection: 'row',
@@ -1947,5 +1954,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
     lineHeight: 16,
+  },
+  priceContainer: {
+    gap: 4,
+  },
+  pricingNote: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+  },
+  primText: {
+    color: '#FF5722',
+    fontWeight: '600',
+  },
+  paymentNoteContainer: {
+    minHeight: 20,
+    justifyContent: 'center',
+    paddingLeft: 24,
   },
 });

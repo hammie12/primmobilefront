@@ -280,9 +280,23 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
             <MaterialCommunityIcons name="clock-outline" size={16} color="#666666" />
             <Text style={styles.serviceDetailText}>{service.duration} mins</Text>
           </View>
-          <View style={styles.serviceDetail}>
-            <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
-            <Text style={styles.serviceDetailText}>Deposit: £{service.price}</Text>
+          <View style={styles.priceContainer}>
+            <View style={styles.serviceDetail}>
+              <MaterialCommunityIcons name="cash" size={16} color="#666666" />
+              <Text style={styles.serviceDetailText}>Full Price: £{service.deposit_price}</Text>
+            </View>
+            <View style={styles.paymentNoteContainer}>
+              <Text style={styles.pricingNote}>Pay to service provider</Text>
+            </View>
+          </View>
+          <View style={styles.priceContainer}>
+            <View style={styles.serviceDetail}>
+              <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
+              <Text style={styles.serviceDetailText}>Deposit: £{service.price}</Text>
+            </View>
+            <View style={styles.paymentNoteContainer}>
+              <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Prim</Text></Text>
+            </View>
           </View>
         </View>
         <TouchableOpacity 
@@ -742,18 +756,37 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   serviceDetails: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 12,
+    backgroundColor: '#F8F9FA',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
   },
   serviceDetail: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 8,
   },
   serviceDetailText: {
     fontSize: 14,
+    color: '#333333',
+    fontWeight: '500',
+  },
+  priceContainer: {
+    gap: 4,
+  },
+  pricingNote: {
+    fontSize: 12,
     color: '#666666',
+    fontStyle: 'italic',
+  },
+  primText: {
+    color: '#FF5722',
+    fontWeight: '600',
+  },
+  paymentNoteContainer: {
+    minHeight: 20,
+    justifyContent: 'center',
+    paddingLeft: 24,
   },
   serviceImagesContainer: {
     marginVertical: 8,

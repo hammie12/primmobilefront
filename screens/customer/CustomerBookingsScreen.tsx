@@ -65,7 +65,9 @@ type Booking = {
     id: string;
     name: string;
     price: number;
-    duration: number;
+    duration_total_minutes: number;
+    duration_hours: number;
+    duration_minutes: number;
     professional_id: string;
   } | null;
   start_time: string;
@@ -258,7 +260,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           serviceDetails: {
             name: selectedBooking.service.name,
             price: selectedBooking.service.price,
-            duration: selectedBooking.service.duration
+            duration: selectedBooking.service.duration_total_minutes
           }
         });
 
@@ -308,7 +310,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           professionalId: professional.id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
-          serviceDuration: selectedBooking.service.duration,
+          serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
           professionalName: selectedBooking.professional_profiles.business_name,
           serviceId: selectedBooking.service.id,
           isRescheduling: true,
@@ -321,7 +323,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           professionalId: professional.id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
-          serviceDuration: selectedBooking.service.duration.toString(),
+          serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
           professionalName: selectedBooking.professional_profiles.business_name,
           serviceId: selectedBooking.service.id,
           workingHours: businessHours,
@@ -350,7 +352,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           professionalId: selectedBooking.service.professional_id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
-          serviceDuration: selectedBooking.service.duration.toString(),
+          serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
           professionalName: selectedBooking.professional_profiles.business_name,
           serviceId: selectedBooking.service.id,
           workingHours: defaultHours
@@ -486,7 +488,9 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
             id,
             name,
             price,
-            duration,
+            duration_total_minutes,
+            duration_hours,
+            duration_minutes,
             professional_id,
             category
           )
@@ -545,7 +549,9 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           id: 'unknown',
           name: booking.notes?.replace('Service: ', '') || 'Service Unavailable',
           price: 0,
-          duration: 30,
+          duration_total_minutes: 0,
+          duration_hours: 0,
+          duration_minutes: 0,
           professional_id: booking.professional_profiles.id,
           category: booking.professional_profiles.user?.professionals?.[0]?.category
         }
@@ -707,7 +713,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
                   color="#FF5722" 
                 />
                 <Typography variant="caption" style={styles.serviceType}>
-                  {booking.service?.name || 'Service Unavailable'}
+                  {booking.service?.name || 'Service Unavailable'} • {booking.service?.duration_hours}h {booking.service?.duration_minutes}m
                 </Typography>
               </View>
               <View style={styles.timeContainer}>
