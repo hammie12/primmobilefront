@@ -63,6 +63,9 @@ type RootStackParamList = {
     serviceDuration: string;
     professionalName: string;
     serviceId: string;
+    isRescheduling: boolean;
+    originalBookingId?: string;
+    originalBookingStatus?: string;
   };
   // ... other routes
 };
@@ -111,21 +114,58 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
       
       console.log('Fetching data for professional ID:', professionalId);
       
-      // Fetch professional profile
-      const { data: profile, error } = await supabase
+      // Fetch professional profile from professionals table
+      const { data: professional, error: professionalError } = await supabase
         .from('professionals')
-        .select('*, business_hours')
+        .select(`
+          id,
+          user_id,
+          name,
+          business_name,
+          title,
+          about,
+          category,
+          address,
+          phone,
+          email,
+          website,
+          profile_image,
+          banner_image,
+          rating,
+          review_count,
+          years_of_experience
+        `)
         .eq('id', professionalId)
         .single();
 
-      if (error) {
-        console.error('Error fetching professional profile:', error);
-        throw error;
+      if (professionalError) {
+        console.error('Error fetching professional:', professionalError);
+        throw professionalError;
       }
 
-      console.log('Fetched professional profile:', profile);
+      // Fetch working hours
+      const { data: workingHours, error: workingHoursError } = await supabase
+        .from('working_hours')
+        .select('*')
+        .eq('professional_id', professionalId);
 
-      // Fetch services using the professional's ID from the professionals table
+      if (workingHoursError) {
+        console.error('Error fetching working hours:', workingHoursError);
+        throw workingHoursError;
+      }
+
+      // Transform working hours into the expected format
+      const businessHours = DAYS_OF_WEEK.reduce((acc, day, index) => {
+        const dayHours = workingHours?.find(wh => wh.day_of_week === index + 1);
+        acc[day] = {
+          isOpen: dayHours?.is_open ?? false,
+          openTime: dayHours?.start_time ?? '09:00',
+          closeTime: dayHours?.end_time ?? '17:00'
+        };
+        return acc;
+      }, {} as Record<string, { isOpen: boolean; openTime: string; closeTime: string }>);
+
+      // Fetch services using the professional's ID
       const { data: services, error: servicesError } = await supabase
         .from('services')
         .select(`
@@ -133,90 +173,63 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
           professional_id,
           name,
           description,
-          duration,
+          duration_total_minutes,
           price,
           deposit_price,
           category,
-          images,
-          created_at,
-          updated_at
+          images
         `)
-        .eq('professional_id', professionalId)
-        .order('name', { ascending: true }); // Order by name to help identify duplicates
+        .eq('professional_id', professionalId);
 
       if (servicesError) {
         console.error('Error fetching services:', servicesError);
         throw servicesError;
       }
 
-      console.log('Raw services from database:', services);
-
-      // Create a Map to store unique services by ID
-      const uniqueServices = new Map();
-      services?.forEach(service => {
-        if (!uniqueServices.has(service.id)) {
-          uniqueServices.set(service.id, {
+      // Transform services to match the expected format
+      const transformedServices = services?.map(service => ({
         id: service.id,
         professional_id: service.professional_id,
         name: service.name,
-        description: service.description || '',
-        duration: service.duration,
+        description: service.description,
+        duration: service.duration_total_minutes,
         price: service.price,
         deposit_price: service.deposit_price || service.price,
-        category: service.category as ServiceCategory,
-        images: service.images || [],
-        created_at: service.created_at,
-        updated_at: service.updated_at
-          });
-        } else {
-          console.warn('Duplicate service found:', {
-            id: service.id,
-            name: service.name,
-            category: service.category
-          });
-        }
-      });
+        category: service.category,
+        images: service.images || []
+      })) || [];
 
-      // Convert Map to array
-      const transformedServices = Array.from(uniqueServices.values());
-      console.log('Transformed unique services:', transformedServices);
-
+      // Set the profile data with the fetched information
       const profileDataToSet = {
-        id: profile?.id || '',
-        userId: profile?.user_id || '',
-        bannerImage: profile?.banner_image || null,
-        profileImage: profile?.profile_image || null,
-        name: profile?.name || '',
-        title: profile?.title || '',
-        businessName: profile?.business_name || '',
-        category: profile?.category || '',
-        about: profile?.about || '',
-        address: typeof profile?.address === 'string' ? JSON.parse(profile.address) : profile?.address || {
-          postcode: '',
-          address_line_1: '',
-          address_line_2: '',
-          city: '',
-          county: ''
-        },
-        phone: profile?.phone || '',
-        email: profile?.email || '',
-        website: profile?.website || '',
-        rating: profile?.rating || 0,
-        reviewCount: profile?.review_count || 0,
+        id: professional?.id || '',
+        userId: professional?.user_id || '',
+        bannerImage: professional?.banner_image || null,
+        profileImage: professional?.profile_image || null,
+        name: professional?.name || '',
+        title: professional?.title || '',
+        businessName: professional?.business_name || '',
+        category: professional?.category || '',
+        about: professional?.about || '',
+        address: typeof professional?.address === 'string' 
+          ? JSON.parse(professional.address) 
+          : professional?.address || {
+            postcode: '',
+            address_line_1: '',
+            address_line_2: '',
+            city: '',
+            county: ''
+          },
+        phone: professional?.phone || '',
+        email: professional?.email || '',
+        website: professional?.website || '',
+        rating: professional?.rating || 0,
+        reviewCount: professional?.review_count || 0,
         services: transformedServices,
-        businessHours: profile?.business_hours || {},
-        reviews: [] // We'll fetch reviews separately if needed
+        businessHours,
+        reviews: [] // Reviews will be fetched separately if needed
       };
 
-      console.log('Setting profile data with unique services:', {
-        serviceCount: transformedServices.length,
-        services: transformedServices.map(s => ({
-          id: s.id,
-          name: s.name,
-          category: s.category
-        }))
-      });
-      
+      console.log('Setting profile data:', profileDataToSet);
       setProfileData(profileDataToSet);
 
     } catch (error) {
@@ -282,7 +295,8 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
               servicePrice: service.price,
               serviceDuration: service.duration.toString(),
               professionalName: profileData.businessName,
-              serviceId: service.id
+              serviceId: service.id,
+              isRescheduling: false
             });
           }}
         >
@@ -320,27 +334,35 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Reviews</Text>
       </View>
-      {profileData.reviews.map((review) => (
-        <View key={review.id} style={styles.reviewCard}>
-          <View style={styles.reviewHeader}>
-            <Text style={styles.reviewUser}>{review.customer_name || 'Anonymous'}</Text>
-            <View style={styles.ratingContainer}>
-              {[...Array(5)].map((_, i) => (
-                <MaterialCommunityIcons
-                  key={i}
-                  name={i < review.rating ? 'star' : 'star-outline'}
-                  size={16}
-                  color="#FFD700"
-                />
-              ))}
+      {profileData.reviews.length === 0 ? (
+        <Text style={styles.noReviewsText}>No reviews yet</Text>
+      ) : (
+        profileData.reviews.map((review) => (
+          <View key={review.id} style={styles.reviewCard}>
+            <View style={styles.reviewHeader}>
+              <Text style={styles.reviewUser}>
+                {review.customer_profiles?.first_name 
+                  ? `${review.customer_profiles.first_name} ${review.customer_profiles.last_name?.charAt(0) || ''}.`
+                  : 'Anonymous'}
+              </Text>
+              <View style={styles.ratingContainer}>
+                {[...Array(5)].map((_, i) => (
+                  <MaterialCommunityIcons
+                    key={i}
+                    name={i < review.rating ? 'star' : 'star-outline'}
+                    size={16}
+                    color="#FFD700"
+                  />
+                ))}
+              </View>
             </View>
+            <Text style={styles.reviewComment}>{review.comment}</Text>
+            <Text style={styles.reviewDate}>
+              {new Date(review.created_at).toLocaleDateString()}
+            </Text>
           </View>
-          <Text style={styles.reviewComment}>{review.comment}</Text>
-          <Text style={styles.reviewDate}>
-            {new Date(review.created_at).toLocaleDateString()}
-          </Text>
-        </View>
-      ))}
+        ))
+      )}
     </View>
   );
 
@@ -436,6 +458,15 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
+      <View style={styles.headerBanner}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={24} color="#333333" />
+        </TouchableOpacity>
+      </View>
+      
       <View style={styles.container}>
         <ScrollView style={styles.scrollView}>
           {/* Banner */}
@@ -541,6 +572,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   scrollView: {
     flex: 1,
@@ -804,6 +836,25 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   noServicesText: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 0 : 16,
+    height: Platform.OS === 'ios' ? 44 : 60,
+    backgroundColor: '#F5F5F5',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  noReviewsText: {
     fontSize: 16,
     color: '#666666',
     textAlign: 'center',

@@ -13,7 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useAuth } from '../contexts/AuthContext';
-import { UserRole } from '../types/user';
+import { UserRole, ServiceCategory } from '../types/user';
 import { supabase } from '../lib/supabase';
 
 const SignUpScreen = () => {
@@ -28,6 +28,7 @@ const SignUpScreen = () => {
     confirmPassword: '',
     role: 'CUSTOMER' as UserRole,
     businessName: '',
+    category: '' as ServiceCategory,
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -39,6 +40,11 @@ const SignUpScreen = () => {
 
     if (formData.role === 'PROFESSIONAL' && !formData.businessName) {
       Alert.alert('Error', 'Business name is required for professionals');
+      return false;
+    }
+
+    if (formData.role === 'PROFESSIONAL' && !formData.category) {
+      Alert.alert('Error', 'Please select a service category');
       return false;
     }
 
@@ -76,7 +82,9 @@ const SignUpScreen = () => {
             role: formData.role,
             first_name: formData.firstName,
             last_name: formData.lastName,
+            phone: formData.phone,
             business_name: formData.role === 'PROFESSIONAL' ? formData.businessName : undefined,
+            category: formData.role === 'PROFESSIONAL' ? formData.category : undefined,
           },
           emailRedirectTo: 'prim://auth/callback',
         },
@@ -116,6 +124,24 @@ const SignUpScreen = () => {
           },
         ]
       );
+
+      // Create professional profile if role is PROFESSIONAL
+      if (formData.role === 'PROFESSIONAL') {
+        const { error: profileError } = await supabase
+          .from('professionals')
+          .insert([
+            {
+              user_id: session?.user.id,
+              phone: formData.phone,
+              email: email,
+              category: formData.category,
+            }
+          ]);
+
+        if (profileError) {
+          console.error('[SignUpScreen] Error creating professional profile:', profileError);
+        }
+      }
     } catch (error: any) {
       console.log('[SignUpScreen] Signup error:', error);
       if (error.message?.includes('email_address_invalid')) {
@@ -231,6 +257,52 @@ const SignUpScreen = () => {
                   onChangeText={(text) => setFormData({ ...formData, businessName: text })}
                   placeholderTextColor="#666666"
                 />
+              )}
+
+              {formData.role === 'PROFESSIONAL' && (
+                <View style={styles.categorySelector}>
+                  <Text style={styles.categoryLabel}>Select your service category:</Text>
+                  <View style={styles.categoryButtons}>
+                    <TouchableOpacity
+                      style={[
+                        styles.categoryButton,
+                        formData.category === 'HAIR' && styles.categoryButtonActive,
+                      ]}
+                      onPress={() => setFormData({ ...formData, category: 'HAIR' })}
+                    >
+                      <Text style={[
+                        styles.categoryButtonText,
+                        formData.category === 'HAIR' && styles.categoryButtonTextActive
+                      ]}>Hair</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.categoryButton,
+                        formData.category === 'NAILS' && styles.categoryButtonActive,
+                      ]}
+                      onPress={() => setFormData({ ...formData, category: 'NAILS' })}
+                    >
+                      <Text style={[
+                        styles.categoryButtonText,
+                        formData.category === 'NAILS' && styles.categoryButtonTextActive
+                      ]}>Nails</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.categoryButton,
+                        formData.category === 'LASHES' && styles.categoryButtonActive,
+                      ]}
+                      onPress={() => setFormData({ ...formData, category: 'LASHES' })}
+                    >
+                      <Text style={[
+                        styles.categoryButtonText,
+                        formData.category === 'LASHES' && styles.categoryButtonTextActive
+                      ]}>Lashes</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               )}
 
               <TextInput
@@ -393,5 +465,39 @@ const styles = StyleSheet.create({
     color: '#666666',
     paddingHorizontal: 16,
     fontSize: 14,
+  },
+  categorySelector: {
+    marginBottom: 16,
+  },
+  categoryLabel: {
+    fontSize: 16,
+    color: '#666666',
+    marginBottom: 8,
+  },
+  categoryButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  categoryButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    alignItems: 'center',
+  },
+  categoryButtonActive: {
+    backgroundColor: '#FF5722',
+    borderColor: '#FF5722',
+  },
+  categoryButtonText: {
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  categoryButtonTextActive: {
+    color: '#FFFFFF',
   },
 });

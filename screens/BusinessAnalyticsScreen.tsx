@@ -43,6 +43,11 @@ type HourlyBooking = {
   percentage: number;
 };
 
+type RevenueData = {
+  label: string;
+  revenue: number;
+};
+
 export const BusinessAnalyticsScreen = () => {
   const { user } = useAuth();
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodType>('month');
@@ -273,62 +278,189 @@ export const BusinessAnalyticsScreen = () => {
   }, [professionalId, selectedPeriod]);
 
   // Fetch monthly revenue data for the chart
-  useEffect(() => {
-    const fetchMonthlyRevenue = async () => {
-      if (!professionalId) return;
+  const fetchTimeBasedRevenue = async () => {
+    if (!professionalId) return;
 
-      try {
-        // Get date range for last 12 months
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setMonth(startDate.getMonth() - 11);
-        startDate.setDate(1);
-        startDate.setHours(0, 0, 0, 0);
+    try {
+      let startDate = new Date();
+      let endDate = new Date();
+      let revenueData: RevenueData[] = [];
 
-        const { data: bookings, error } = await supabase
-          .from('bookings')
-          .select(`
-            start_time,
-            services (
-              price
-            )
-          `)
-          .eq('professional_id', professionalId)
-          .gte('start_time', startDate.toISOString())
-          .lt('start_time', endDate.toISOString())
-          .order('start_time', { ascending: true });
+      switch (selectedPeriod) {
+        case 'year':
+          // Last 5 years
+          startDate.setFullYear(startDate.getFullYear() - 4);
+          startDate.setMonth(0, 1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'month':
+          // Last 12 months
+          startDate.setMonth(startDate.getMonth() - 11);
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          // Weeks in current month
+          startDate.setDate(1);
+          endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'day':
+          // Days in current week
+          startDate.setDate(startDate.getDate() - startDate.getDay());
+          endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + 6);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+      }
 
-        if (error) throw error;
+      const { data: bookings, error } = await supabase
+        .from('bookings')
+        .select(`
+          start_time,
+          services (
+            price
+          )
+        `)
+        .eq('professional_id', professionalId)
+        .gte('start_time', startDate.toISOString())
+        .lt('start_time', endDate.toISOString())
+        .order('start_time', { ascending: true });
 
-        // Group bookings by month and calculate revenue
-        const monthlyData = bookings?.reduce((acc: { [key: string]: number }, booking) => {
-          const month = new Date(booking.start_time).toISOString().slice(0, 7); // YYYY-MM format
-          const revenue = (booking.services as any)?.price || 0;
-          acc[month] = (acc[month] || 0) + revenue;
-          return acc;
-        }, {});
+      if (error) throw error;
 
-        // Fill in missing months with zero revenue
-        const revenueData: MonthlyRevenue[] = [];
+      // Group bookings based on selected period
+      const revenueMap = new Map<string, number>();
+
+      bookings?.forEach(booking => {
+        let key = '';
+        const date = new Date(booking.start_time);
+        const revenue = (booking.services as any)?.price || 0;
+
+        switch (selectedPeriod) {
+          case 'year':
+            key = date.getFullYear().toString();
+            break;
+          case 'month':
+            key = date.toISOString().slice(0, 7); // YYYY-MM
+            break;
+          case 'week':
+            // Group by week number in the month
+            const weekNum = Math.ceil((date.getDate()) / 7);
+            key = `Week ${weekNum}`;
+            break;
+          case 'day':
+            key = date.toLocaleDateString('en-US', { weekday: 'short' });
+            break;
+        }
+
+        revenueMap.set(key, (revenueMap.get(key) || 0) + revenue);
+      });
+
+      // Fill in missing periods with zero revenue
+      if (selectedPeriod === 'year') {
+        const currentYear = new Date().getFullYear();
+        for (let year = currentYear - 4; year <= currentYear; year++) {
+          if (!revenueMap.has(year.toString())) {
+            revenueMap.set(year.toString(), 0);
+          }
+        }
+        revenueData = Array.from(revenueMap.entries())
+          .map(([year, revenue]) => ({
+            label: year,
+            revenue
+          }))
+          .sort((a, b) => parseInt(a.label) - parseInt(b.label));
+      } else if (selectedPeriod === 'month') {
         for (let i = 0; i < 12; i++) {
           const date = new Date(startDate);
           date.setMonth(date.getMonth() + i);
-          const month = date.toISOString().slice(0, 7);
-          revenueData.push({
-            month,
-            revenue: monthlyData?.[month] || 0
-          });
+          const key = date.toISOString().slice(0, 7);
+          if (!revenueMap.has(key)) {
+            revenueMap.set(key, 0);
+          }
+        }
+        revenueData = Array.from(revenueMap.entries())
+          .sort((a, b) => a[0].localeCompare(b[0])) // Sort by date string
+          .map(([month, revenue]) => ({
+            label: new Date(month).toLocaleDateString('en-US', { month: 'short' }),
+            revenue
+          }));
+      } else if (selectedPeriod === 'week') {
+        // Get all dates in the current month
+        const daysInMonth = endDate.getDate();
+        const weeksMap = new Map<number, { startDate: Date; endDate: Date }>();
+        
+        // Initialize weeks
+        for (let day = 1; day <= daysInMonth; day++) {
+          const date = new Date(startDate.getFullYear(), startDate.getMonth(), day);
+          const weekNum = Math.ceil(day / 7);
+          
+          if (!weeksMap.has(weekNum)) {
+            const weekStart = new Date(date);
+            const weekEnd = new Date(date);
+            weekEnd.setDate(Math.min(weekStart.getDate() + 6, daysInMonth));
+            weeksMap.set(weekNum, {
+              startDate: weekStart,
+              endDate: weekEnd
+            });
+          }
         }
 
-        setMonthlyRevenue(revenueData);
+        // Fill in missing weeks
+        for (let week = 1; week <= weeksMap.size; week++) {
+          const weekDates = weeksMap.get(week);
+          if (weekDates) {
+            const label = `${weekDates.startDate.getDate()}-${weekDates.endDate.getDate()} ${
+              weekDates.startDate.toLocaleDateString('en-US', { month: 'short' })
+            }`;
+            if (!revenueMap.has(label)) {
+              revenueMap.set(label, 0);
+            }
+          }
+        }
 
-      } catch (error) {
-        console.error('Error fetching monthly revenue:', error);
+        // Convert to array and preserve chronological order
+        revenueData = Array.from(weeksMap.entries())
+          .map(([weekNum, dates]) => {
+            const label = `${dates.startDate.getDate()}-${dates.endDate.getDate()} ${
+              dates.startDate.toLocaleDateString('en-US', { month: 'short' })
+            }`;
+            return {
+              label,
+              revenue: revenueMap.get(label) || 0
+            };
+          });
+      } else if (selectedPeriod === 'day') {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        days.forEach(day => {
+          if (!revenueMap.has(day)) {
+            revenueMap.set(day, 0);
+          }
+        });
+        revenueData = Array.from(revenueMap.entries())
+          .map(([day, revenue]) => ({
+            label: day,
+            revenue
+          }))
+          .sort((a, b) => 
+            days.indexOf(a.label) - days.indexOf(b.label)
+          );
       }
-    };
 
-    fetchMonthlyRevenue();
-  }, [professionalId]);
+      setMonthlyRevenue(revenueData);
+
+    } catch (error) {
+      console.error('Error fetching revenue data:', error);
+    }
+  };
+
+  // Update the useEffect that calls fetchMonthlyRevenue
+  useEffect(() => {
+    if (professionalId) {
+      fetchTimeBasedRevenue();
+    }
+  }, [professionalId, selectedPeriod]);
 
   const fetchServiceRevenue = async () => {
     if (!professionalId) return;
@@ -510,24 +642,42 @@ export const BusinessAnalyticsScreen = () => {
     </View>
   );
 
-  const renderMetricCard = (title: string, value: string | number, change: number, isPositive: boolean) => (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricTitle}>{title}</Text>  
-      <Text style={styles.metricValue}>
-        {title.includes('Revenue') ? `£${typeof value === 'number' ? value.toFixed(2) : value}` : value}
-      </Text>
-      <View style={styles.changeContainer}>
-        <MaterialCommunityIcons 
-          name={change >= 0 ? 'arrow-up' : 'arrow-down'} 
-          size={16} 
-          color={change >= 0 ? '#4CAF50' : '#F44336'} 
-        />
-        <Text style={[styles.changeText, { color: change >= 0 ? '#4CAF50' : '#F44336' }]}>
-          {Math.abs(change).toFixed(1)}% vs last month
+  const renderMetricCard = (title: string, value: string | number, change: number, isPositive: boolean) => {
+    // Get the appropriate period text based on selectedPeriod
+    const getPeriodText = () => {
+      switch (selectedPeriod) {
+        case 'day':
+          return 'yesterday';
+        case 'week':
+          return 'last week';
+        case 'month':
+          return 'last month';
+        case 'year':
+          return 'last year';
+        default:
+          return 'last month';
+      }
+    };
+
+    return (
+      <View style={styles.metricCard}>
+        <Text style={styles.metricTitle}>{title}</Text>  
+        <Text style={styles.metricValue}>
+          {title.includes('Revenue') ? `£${typeof value === 'number' ? value.toFixed(2) : value}` : value}
         </Text>
+        <View style={styles.changeContainer}>
+          <MaterialCommunityIcons 
+            name={change >= 0 ? 'arrow-up' : 'arrow-down'} 
+            size={16} 
+            color={change >= 0 ? '#4CAF50' : '#F44336'} 
+          />
+          <Text style={[styles.changeText, { color: change >= 0 ? '#4CAF50' : '#F44336' }]}>
+            {Math.abs(change).toFixed(1)}% vs {getPeriodText()}
+          </Text>
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
 
   const renderChartCard = (title: string, subtitle: string) => (
     <View style={styles.chartCard}>
@@ -546,11 +696,41 @@ export const BusinessAnalyticsScreen = () => {
     const maxValue = Math.max(...monthlyRevenue.map(item => item.revenue));
     const chartHeight = 250;
 
+    const getChartTitle = () => {
+      switch (selectedPeriod) {
+        case 'year':
+          return 'Yearly Revenue';
+        case 'month':
+          return 'Monthly Revenue';
+        case 'week':
+          return 'Weekly Revenue';
+        case 'day':
+          return 'Daily Revenue';
+        default:
+          return 'Revenue';
+      }
+    };
+
+    const getChartSubtitle = () => {
+      switch (selectedPeriod) {
+        case 'year':
+          return 'Last 5 years performance';
+        case 'month':
+          return 'Last 12 months performance';
+        case 'week':
+          return 'Current month by week';
+        case 'day':
+          return 'Current week performance';
+        default:
+          return '';
+      }
+    };
+
     return (
       <View style={styles.chartCard}>
         <View style={styles.chartHeader}>
-          <Text style={styles.chartTitle}>Monthly Revenue</Text>
-          <Text style={styles.chartSubtitle}>Last 12 months performance</Text>
+          <Text style={styles.chartTitle}>{getChartTitle()}</Text>
+          <Text style={styles.chartSubtitle}>{getChartSubtitle()}</Text>
         </View>
         <View style={[styles.chartContainer, { height: chartHeight + 60 }]}>
           {/* Y-axis labels */}
@@ -568,14 +748,10 @@ export const BusinessAnalyticsScreen = () => {
           <View style={styles.barsContainer}>
             {monthlyRevenue.map((item, index) => {
               const barHeight = (item.revenue / maxValue) * chartHeight;
-              const [year, month] = item.month.split('-');
-              const monthName = new Date(parseInt(year), parseInt(month) - 1)
-                .toLocaleString('default', { month: 'short' });
-
               return (
                 <View key={index} style={styles.barWrapper}>
                   <View style={[styles.bar, { height: barHeight }]} />
-                  <Text style={styles.xAxisLabel}>{monthName}</Text>
+                  <Text style={styles.xAxisLabel}>{item.label}</Text>
                 </View>
               );
             })}
@@ -584,7 +760,7 @@ export const BusinessAnalyticsScreen = () => {
         <View style={styles.chartLegend}>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#FF5722' }]} />
-            <Text style={styles.legendText}>Monthly Revenue</Text>
+            <Text style={styles.legendText}>{getChartTitle()}</Text>
           </View>
         </View>
       </View>

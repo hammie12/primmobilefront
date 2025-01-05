@@ -47,15 +47,15 @@ const DEFAULT_BUSINESS_HOURS = {
   Sunday: { isOpen: false, openTime: '10:00', closeTime: '16:00' }
 };
 
-// Add this constant to ensure consistent day order
+// Update this constant to include day numbers that match the database
 const DAYS_OF_WEEK = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday'
+  'Monday',    // 1
+  'Tuesday',   // 2
+  'Wednesday', // 3
+  'Thursday',  // 4
+  'Friday',    // 5
+  'Saturday',  // 6
+  'Sunday'     // 7
 ];
 
 // Define the service categories enum to match your database
@@ -71,9 +71,11 @@ type Service = {
   id: string;
   name: string;
   description: string;
-  duration: number;
+  duration_hours: number;
+  duration_minutes: number;
+  duration_total_minutes: number;
   price: number;
-  deposit_price: number;
+  full_price: number;
   category: ServiceCategory;
   images: string[];
 };
@@ -90,6 +92,19 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
   { label: 'Nails', value: SERVICE_CATEGORIES.NAILS },
   { label: 'Lashes', value: SERVICE_CATEGORIES.LASHES },
 ];
+
+// First, add the Review type definition
+type Review = {
+  id: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+  customer_profiles?: {
+    user_id: string;
+    first_name: string;
+    last_name: string;
+  };
+};
 
 export const ProfessionalProfileScreen = () => {
   const navigation = useNavigation<NavigationType>();
@@ -116,7 +131,8 @@ export const ProfessionalProfileScreen = () => {
     rating: 0,
     reviewCount: 0,
     services: [] as Service[],
-    businessHours: DEFAULT_BUSINESS_HOURS
+    businessHours: DEFAULT_BUSINESS_HOURS,
+    reviews: [] as Review[]
   });
 
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -165,12 +181,54 @@ export const ProfessionalProfileScreen = () => {
       
       const { data: profile, error } = await supabase
         .from('professionals')
-        .select('*, business_hours')
+        .select('*')
         .eq('user_id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') {
         throw error;
+      }
+
+      // Fetch working hours if profile exists
+      let workingHours = DEFAULT_BUSINESS_HOURS;
+      if (profile) {
+        const { data: hours, error: hoursError } = await supabase
+          .from('working_hours')
+          .select('*')
+          .eq('professional_id', profile.id);
+
+        if (hoursError) {
+          console.error('Error fetching working hours:', hoursError);
+        } else if (hours && hours.length > 0) {
+          // Convert working_hours data to our business hours format
+          workingHours = DAYS_OF_WEEK.reduce((acc, day, index) => {
+            // Find the hours for this day (day_of_week in DB is 1-based)
+            const dayHours = hours.find(h => h.day_of_week === index + 1);
+            
+            acc[day] = {
+              isOpen: dayHours?.is_open ?? DEFAULT_BUSINESS_HOURS[day].isOpen,
+              openTime: dayHours?.start_time ?? DEFAULT_BUSINESS_HOURS[day].openTime,
+              closeTime: dayHours?.end_time ?? DEFAULT_BUSINESS_HOURS[day].closeTime
+            };
+            return acc;
+          }, {} as typeof DEFAULT_BUSINESS_HOURS);
+        } else {
+          // If no working hours exist, create default ones
+          const defaultHoursPromises = DAYS_OF_WEEK.map((day, index) => {
+            const defaultDay = DEFAULT_BUSINESS_HOURS[day];
+            return supabase
+              .from('working_hours')
+              .insert({
+                professional_id: profile.id,
+                day_of_week: index + 1, // Use 1-based index for database
+                start_time: defaultDay.openTime,
+                end_time: defaultDay.closeTime,
+                is_open: defaultDay.isOpen
+              });
+          });
+
+          await Promise.all(defaultHoursPromises);
+        }
       }
 
       // Log the fetched address to verify structure
@@ -187,12 +245,46 @@ export const ProfessionalProfileScreen = () => {
         }
       }
 
-      setProfileData(prev => ({
-        ...prev,
+      // Fetch reviews if profile exists
+      let reviews = [];
+      if (profile) {
+        const { data: reviewsData, error: reviewsError } = await supabase
+          .from('reviews')
+          .select(`
+            id,
+            rating,
+            comment,
+            created_at,
+            customer_profiles (
+              user_id,
+              first_name,
+              last_name
+            )
+          `)
+          .eq('professional_id', profile.id)
+          .order('created_at', { ascending: false });
+
+        if (reviewsError) {
+          console.error('Error fetching reviews:', reviewsError);
+        } else {
+          reviews = reviewsData || [];
+        }
+      }
+
+      // Get initial data from user metadata
+      const initialData = {
         name: `${metadata.first_name} ${metadata.last_name}`,
         businessName: metadata.business_name,
+        phone: metadata.phone || '',
+        email: session.user.email || '',
+        category: metadata.category || '',
+      };
+
+      // Merge metadata with profile data, preferring profile data if it exists
+      setProfileData(prev => ({
+        ...prev,
+        ...initialData,
         title: profile?.title || '',
-        category: profile?.category || '',
         about: profile?.about || '',
         address: {
           postcode: parsedAddress?.postcode || '',
@@ -201,15 +293,17 @@ export const ProfessionalProfileScreen = () => {
           city: parsedAddress?.city || '',
           county: parsedAddress?.county || ''
         },
-        phone: profile?.phone || '',
-        email: profile?.email || '',
+        phone: profile?.phone || initialData.phone,
+        email: profile?.email || initialData.email,
+        category: profile?.category || initialData.category,
         website: profile?.website || '',
         rating: profile?.rating || 0,
         reviewCount: profile?.review_count || 0,
         bannerImage: profile?.banner_image || null,
         profileImage: profile?.profile_image || null,
-        businessHours: profile?.business_hours || DEFAULT_BUSINESS_HOURS,
-        services: []
+        businessHours: workingHours,
+        services: [],
+        reviews: reviews
       }));
 
       // Fetch services if profile exists
@@ -228,6 +322,9 @@ export const ProfessionalProfileScreen = () => {
           }));
         }
       }
+
+      console.log('[ProfessionalProfileScreen] User metadata:', metadata);
+      console.log('[ProfessionalProfileScreen] Session:', session?.user);
 
     } catch (error) {
       console.error('Error in fetchProfileData:', error);
@@ -286,7 +383,6 @@ export const ProfessionalProfileScreen = () => {
         website: profileData.website || '',
         profile_image: profileData.profileImage,
         banner_image: profileData.bannerImage,
-        business_hours: profileData.businessHours,
       };
 
       const { data: existingProfile, error: checkError } = await supabase
@@ -335,7 +431,7 @@ export const ProfessionalProfileScreen = () => {
 
       // Launch image picker with correct configuration
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: type === 'banner' ? [16, 9] : [1, 1],
         quality: 0.8,
@@ -345,6 +441,9 @@ export const ProfessionalProfileScreen = () => {
         const imageUri = result.assets[0].uri;
         
         try {
+          // Show loading indicator
+          setIsLoading(true);
+
           const fileExtension = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
           const mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
           const filePath = `${user?.id}/${type}-${Date.now()}.${fileExtension}`;
@@ -353,36 +452,60 @@ export const ProfessionalProfileScreen = () => {
           const arrayBuffer = await response.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
 
-          // Use 'profile-images' bucket for profile and banner images
-          const { data, error: uploadError } = await supabase.storage
-            .from('profile-images')  // Always use profile-images bucket for profile/banner
+          // Upload to Supabase Storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('profile-images')
             .upload(filePath, uint8Array, {
               contentType: mimeType,
               upsert: true
             });
 
-          if (uploadError) {
-            console.error('Upload error:', uploadError);
-            throw uploadError;
-          }
+          if (uploadError) throw uploadError;
 
+          // Get the public URL
           const { data: { publicUrl } } = supabase.storage
-            .from('profile-images')  // Always use profile-images bucket for profile/banner
+            .from('profile-images')
             .getPublicUrl(filePath);
 
+          // Get professional's profile ID
+          const { data: profile, error: profileError } = await supabase
+            .from('professionals')
+            .select('id')
+            .eq('user_id', user.id)
+            .single();
+
+          if (profileError) throw profileError;
+
+          // Update the database with the new image URL
+          const { error: updateError } = await supabase
+            .from('professionals')
+            .update({
+              [type === 'banner' ? 'banner_image' : 'profile_image']: publicUrl
+            })
+            .eq('id', profile.id);
+
+          if (updateError) throw updateError;
+
+          // Update local state
           setProfileData(prev => ({
             ...prev,
             [type === 'banner' ? 'bannerImage' : 'profileImage']: publicUrl,
           }));
 
         } catch (error) {
-          console.error('Upload error:', error);
-          throw error;
+          console.error('Error during upload process:', error);
+          Alert.alert(
+            'Upload Error',
+            'Failed to upload image. Please try again.'
+          );
+        } finally {
+          setIsLoading(false);
         }
       }
     } catch (error) {
       console.error('Error picking/uploading image:', error);
       Alert.alert('Error', 'Failed to pick or upload image');
+      setIsLoading(false);
     }
   };
 
@@ -514,7 +637,14 @@ export const ProfessionalProfileScreen = () => {
       <View style={styles.serviceDetails}>
         <View style={styles.serviceDetail}>
           <MaterialCommunityIcons name="clock-outline" size={16} color="#666666" />
-          <Text style={styles.serviceDetailText}>{service.duration} mins</Text>
+          <Text style={styles.serviceDetailText}>
+            {service.duration_hours > 0 ? `${service.duration_hours}h ` : ''}
+            {service.duration_minutes}min
+          </Text>
+        </View>
+        <View style={styles.serviceDetail}>
+          <MaterialCommunityIcons name="cash" size={16} color="#666666" />
+          <Text style={styles.serviceDetailText}>£{service.full_price}</Text>
         </View>
         <View style={styles.serviceDetail}>
           <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
@@ -776,7 +906,11 @@ export const ProfessionalProfileScreen = () => {
           onChangeText={(text) => setProfileData(prev => ({ ...prev, about: text }))}
           placeholder="About"
           multiline
+          maxLength={500}
         />
+        <Text style={styles.characterCount}>
+          {profileData.about?.length || 0}/500 characters
+        </Text>
       </View>
 
       <TouchableOpacity style={styles.saveButton} onPress={handleSaveProfile}>
@@ -846,6 +980,43 @@ export const ProfessionalProfileScreen = () => {
     }
   };
 
+  const renderReviews = () => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Reviews</Text>
+      </View>
+      {!profileData.reviews || profileData.reviews.length === 0 ? (
+        <Text style={styles.noReviewsText}>No reviews yet</Text>
+      ) : (
+        profileData.reviews.map((review) => (
+          <View key={review.id} style={styles.reviewCard}>
+            <View style={styles.reviewHeader}>
+              <Text style={styles.reviewUser}>
+                {review.customer_profiles?.first_name 
+                  ? `${review.customer_profiles.first_name} ${review.customer_profiles.last_name?.charAt(0) || ''}.`
+                  : 'Anonymous'}
+              </Text>
+              <View style={styles.ratingContainer}>
+                {[...Array(5)].map((_, i) => (
+                  <MaterialCommunityIcons
+                    key={i}
+                    name={i < review.rating ? 'star' : 'star-outline'}
+                    size={16}
+                    color="#FFD700"
+                  />
+                ))}
+              </View>
+            </View>
+            <Text style={styles.reviewComment}>{review.comment}</Text>
+            <Text style={styles.reviewDate}>
+              {new Date(review.created_at).toLocaleDateString()}
+            </Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
@@ -914,6 +1085,9 @@ export const ProfessionalProfileScreen = () => {
         <View>
           {renderBusinessHours()}
         </View>
+
+        {/* Reviews */}
+        {renderReviews()}
       </ScrollView>
 
       {/* Service Edit Modal */}
@@ -937,11 +1111,49 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
   const [formData, setFormData] = useState({
     name: service?.name || '',
     description: service?.description || '',
-    duration: service?.duration || '',
+    // Update to use new duration fields
+    hours: service?.duration_hours?.toString() || '0',
+    minutes: service?.duration_minutes?.toString() || '0',
     deposit_price: service?.price?.toString() || '',
+    full_price: service?.full_price?.toString() || '',
     category: service?.category || '',
     images: service?.images || [],
   });
+
+  const handleSave = async () => {
+    if (!formData.name.trim()) {
+      Alert.alert('Error', 'Service name is required');
+      return;
+    }
+
+    if (!formData.category) {
+      Alert.alert('Error', 'Please select a category');
+      return;
+    }
+
+    // Convert hours and minutes to integers
+    const hours = parseInt(formData.hours) || 0;
+    const minutes = parseInt(formData.minutes) || 0;
+    const totalMinutes = (hours * 60) + minutes;
+
+    if (totalMinutes <= 0) {
+      Alert.alert('Error', 'Duration must be greater than 0');
+      return;
+    }
+
+    // Update to match exact database column names
+    onSave({
+      name: formData.name,
+      description: formData.description,
+      duration_hours: hours,
+      duration_minutes: minutes,
+      duration_total_minutes: totalMinutes,
+      price: parseFloat(formData.deposit_price) || 0,
+      full_price: parseFloat(formData.full_price) || 0,
+      category: formData.category,
+      images: formData.images,
+    });
+  };
 
   const handleImagePick = async () => {
     if (formData.images.length >= 6) {
@@ -957,7 +1169,7 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -1022,24 +1234,6 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
     }));
   };
 
-  const handleSave = () => {
-    if (!formData.name.trim()) {
-      Alert.alert('Error', 'Service name is required');
-      return;
-    }
-
-    if (!formData.category) {
-      Alert.alert('Error', 'Please select a category');
-      return;
-    }
-
-    onSave({
-      ...formData,
-      price: parseFloat(formData.deposit_price) || 0,
-      deposit_price: undefined,
-    });
-  };
-
   return (
     <View style={styles.modalContainer}>
       <ScrollView style={styles.modalContent}>
@@ -1088,17 +1282,63 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
             onChangeText={(text) => setFormData(prev => ({ ...prev, description: text }))}
             placeholder="Description"
             multiline
+            maxLength={250}
           />
+          <Text style={styles.characterCount}>
+            {formData.description?.length || 0}/250 characters
+          </Text>
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Duration (in minutes)</Text>
+          <Text style={styles.inputLabel}>Duration</Text>
+          <View style={styles.durationContainer}>
+            <View style={styles.durationInput}>
+              <TextInput
+                style={[styles.input, styles.durationField]}
+                value={formData.hours}
+                onChangeText={(text) => {
+                  // Only allow numbers 0-23
+                  const cleanText = text.replace(/[^0-9]/g, '');
+                  const number = parseInt(cleanText);
+                  if (!cleanText || (number >= 0 && number <= 23)) {
+                    setFormData(prev => ({ ...prev, hours: cleanText }));
+                  }
+                }}
+                placeholder="0"
+                keyboardType="numeric"
+                maxLength={2}
+              />
+              <Text style={styles.durationLabel}>hours</Text>
+            </View>
+            <View style={styles.durationInput}>
+              <TextInput
+                style={[styles.input, styles.durationField]}
+                value={formData.minutes}
+                onChangeText={(text) => {
+                  // Only allow numbers 0-59
+                  const cleanText = text.replace(/[^0-9]/g, '');
+                  const number = parseInt(cleanText);
+                  if (!cleanText || (number >= 0 && number <= 59)) {
+                    setFormData(prev => ({ ...prev, minutes: cleanText }));
+                  }
+                }}
+                placeholder="0"
+                keyboardType="numeric"
+                maxLength={2}
+              />
+              <Text style={styles.durationLabel}>mins</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputLabel}>Full Price</Text>
           <TextInput
             style={styles.input}
-            value={formData.duration}
-            onChangeText={(text) => setFormData(prev => ({ ...prev, duration: text }))}
-            placeholder="e.g., 60"
-            keyboardType="numeric"
+            value={formData.full_price}
+            onChangeText={(text) => setFormData(prev => ({ ...prev, full_price: text }))}
+            placeholder="Full Price"
+            keyboardType="decimal-pad"
           />
         </View>
 
@@ -1111,6 +1351,9 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
             placeholder="Deposit Price"
             keyboardType="decimal-pad"
           />
+          <Text style={styles.paymentNote}>
+            NOTE: Customers will pay deposit via Prim but will pay full price once with the service provider
+          </Text>
         </View>
 
         <View style={styles.imagesContainer}>
@@ -1627,5 +1870,82 @@ const styles = StyleSheet.create({
   categoryButtonTextSelected: {
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  noReviewsText: {
+    color: '#666666',
+    textAlign: 'center',
+    padding: 16,
+  },
+  reviewCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  reviewUser: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  reviewComment: {
+    fontSize: 14,
+    color: '#666666',
+    marginVertical: 12,
+    lineHeight: 20,
+  },
+  reviewDate: {
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  characterCount: {
+    fontSize: 12,
+    color: '#666666',
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  durationContainer: {
+    flexDirection: 'row',
+    gap: 16,
+    alignItems: 'center',
+  },
+  durationInput: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  durationField: {
+    flex: 1,
+    textAlign: 'center',
+  },
+  durationLabel: {
+    fontSize: 14,
+    color: '#666666',
+    minWidth: 40,
+  },
+  paymentNote: {
+    fontSize: 12,
+    color: '#666666',
+    marginTop: 8,
+    fontStyle: 'italic',
+    lineHeight: 16,
   },
 });

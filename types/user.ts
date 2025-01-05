@@ -1,0 +1,1 @@
+export type ServiceCategory = 'HAIR' | 'NAILS' | 'LASHES'; 

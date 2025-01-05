@@ -2,22 +2,27 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Typography } from './Typography';
+
+type RootStackParamList = {
+  BusinessSettings: undefined;
+  // Add other routes as needed
+};
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const BusinessTopBar = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
 
   return (
     <View style={styles.container}>
       <View style={styles.leftSection}>
-        <Text style={styles.title}>Prim Business</Text>
+        <Typography variant="h1" style={styles.title}>
+          Prim Business
+        </Typography>
       </View>
       <View style={styles.rightSection}>
-        <TouchableOpacity
-          style={styles.iconButton}
-          onPress={() => navigation.navigate('Notifications')}
-        >
-          <MaterialCommunityIcons name="bell-outline" size={24} color="#666666" />
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.iconButton}
           onPress={() => navigation.navigate('BusinessSettings')}
@@ -44,6 +49,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 5,
+    height: 60,
+    width: '100%',
   },
   leftSection: {
     flex: 1,

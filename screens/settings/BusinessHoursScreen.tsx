@@ -9,6 +9,7 @@ import {
   Alert,
   Platform,
   Modal,
+  TextInput,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BaseSettingsScreen } from '../../components/BaseSettingsScreen';
@@ -16,6 +17,10 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { supabase } from '../../supabase/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigation } from '@react-navigation/native';
+import { Database } from '../../lib/supabase/schema';
+
+type WorkingHoursRow = Database['public']['Tables']['working_hours']['Row'];
+type WorkingHoursInsert = Database['public']['Tables']['working_hours']['Insert'];
 
 type DaySchedule = {
   isOpen: boolean;
@@ -34,22 +39,80 @@ const DAYS_OF_WEEK = [
   'Thursday',
   'Friday',
   'Saturday',
-  'Sunday'
+  'Sunday',
 ];
+
+// 1-based in DB: Monday=1 -> index=0, Sunday=7->index=6
+const toDayIndex = (dayOfWeek: number) => dayOfWeek - 1;
+const toDayNumber = (index: number) => index + 1;
+
+const DayRow = ({ day, schedule, toggleDay, showTimePicker, isLoading }: {
+  day: string;
+  schedule: WeekSchedule;
+  toggleDay: (day: string) => void;
+  showTimePicker: (day: string, timeType: 'openTime' | 'closeTime') => void;
+  isLoading: boolean;
+}) => (
+  <View key={day} style={styles.dayRow}>
+    <View style={styles.dayHeader}>
+      <Text style={styles.dayText}>{day}</Text>
+      <View style={styles.statusContainer}>
+        <Text style={[
+          styles.statusText,
+          schedule[day].isOpen ? styles.openText : styles.closedText
+        ]}>
+          {schedule[day].isOpen ? 'Open' : 'Closed'}
+        </Text>
+        <Switch
+          value={schedule[day].isOpen}
+          onValueChange={() => toggleDay(day)}
+          trackColor={{ false: '#767577', true: '#4CAF50' }}
+          thumbColor={schedule[day].isOpen ? '#fff' : '#f4f3f4'}
+          disabled={isLoading}
+        />
+      </View>
+    </View>
+    <View style={styles.timesRow}>
+      <TouchableOpacity
+        style={[styles.timeButton, !schedule[day].isOpen && styles.disabledButton]}
+        disabled={isLoading || !schedule[day].isOpen}
+        onPress={() => showTimePicker(day, 'openTime')}
+      >
+        <Text style={styles.timeButtonText}>
+          Opens: {schedule[day].openTime}
+        </Text>
+      </TouchableOpacity>
+      <Text style={styles.separator}>-</Text>
+      <TouchableOpacity
+        style={[styles.timeButton, !schedule[day].isOpen && styles.disabledButton]}
+        disabled={isLoading || !schedule[day].isOpen}
+        onPress={() => showTimePicker(day, 'closeTime')}
+      >
+        <Text style={styles.timeButtonText}>
+          Closes: {schedule[day].closeTime}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
 
 export const BusinessHoursScreen = () => {
   const { user } = useAuth();
   const navigation = useNavigation();
   const [isLoading, setIsLoading] = useState(false);
+
   const [schedule, setSchedule] = useState<WeekSchedule>({
-    Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-    Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-    Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-    Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-    Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
+    Monday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+    Tuesday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+    Wednesday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+    Thursday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
+    Friday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
     Saturday: { isOpen: false, openTime: '10:00', closeTime: '16:00' },
     Sunday: { isOpen: false, openTime: '10:00', closeTime: '16:00' },
   });
+
+  // Must reference "professional_profiles.id"
+  const [professionalProfileId, setProfessionalProfileId] = useState<string | null>(null);
 
   const [showPicker, setShowPicker] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -57,155 +120,161 @@ export const BusinessHoursScreen = () => {
   const [tempTime, setTempTime] = useState(new Date());
 
   useEffect(() => {
-    if (user) {
-      fetchBusinessHours();
+    if (user?.id) {
+      fetchProfileAndWorkingHours(user.id);
     }
   }, [user]);
 
-  const fetchBusinessHours = async () => {
-    if (!user) return;
-    
+  const fetchProfileAndWorkingHours = async (userId: string) => {
     try {
-      // First try to get the business
-      let { data: business, error: businessError } = await supabase
-        .from('businesses')
-        .select('id, business_hours')
-        .eq('owner_id', user.id)
+      setIsLoading(true);
+
+      // First check if professional exists
+      const { data: professional, error: professionalError } = await supabase
+        .from('professionals')
+        .select('id')
+        .eq('user_id', userId)
         .single();
 
-      if (businessError) {
-        // If no business exists, create one with default hours
-        if (businessError.code === 'PGRST116') {
-          const { data: newBusiness, error: createError } = await supabase
-            .from('businesses')
-            .insert([
-              {
-                owner_id: user.id,
-                business_hours: schedule,
-                name: 'My Business', // Only include required fields
-                status: 'active'
-              }
-            ])
-            .select('id, business_hours')
-            .single();
+      if (professionalError || !professional) {
+        // If professional doesn't exist, create one with required fields
+        const { data: newProfessional, error: createError } = await supabase
+          .from('professionals')
+          .insert([{ 
+            user_id: userId,
+            name: 'New Professional', // Add default name
+            status: 'active'  // Add status if required
+          }])
+          .select('id')
+          .single();
 
-          if (createError) throw createError;
-          business = newBusiness;
-        } else {
-          throw businessError;
+        if (createError) {
+          console.error('Error creating professional:', createError);
+          Alert.alert('Error', 'Failed to create professional profile');
+          setIsLoading(false);
+          return;
         }
+        setProfessionalProfileId(newProfessional.id);
+        // No working hours yet for new professional, so return
+        setIsLoading(false);
+        return;
       }
 
-      if (business?.business_hours) {
-        setSchedule(business.business_hours);
+      setProfessionalProfileId(professional.id);
+
+      // Now fetch existing rows from working_hours
+      const { data: workingHours, error: whError } = await supabase
+        .from('working_hours')
+        .select('*')
+        .eq('professional_id', professional.id);
+
+      if (whError) {
+        throw whError;
       }
+
+      if (!workingHours || workingHours.length === 0) {
+        // None found => keep default
+        setIsLoading(false);
+        return;
+      }
+
+      // Convert working_hours rows into our schedule
+      const loadedSchedule: WeekSchedule = { ...schedule };
+      workingHours.forEach((wh: WorkingHoursRow) => {
+        const index = toDayIndex(wh.day_of_week);
+        const dayName = DAYS_OF_WEEK[index];
+        if (!dayName) return;
+        loadedSchedule[dayName] = {
+          isOpen: !!wh.is_open,
+          openTime: wh.start_time ?? '09:00',
+          closeTime: wh.end_time ?? '17:00',
+        };
+      });
+      setSchedule(loadedSchedule);
     } catch (error: any) {
-      console.error('Error fetching business hours:', error);
-      // More detailed error message
-      const errorMessage = error.code === 'PGRST204' 
-        ? 'Database schema error. Please contact support.'
-        : 'Failed to load business hours. Please try again.';
-      Alert.alert('Error', errorMessage);
+      console.error('Error fetching working hours:', error);
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to load business hours. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleSave = async () => {
-    if (!user) {
-      Alert.alert('Error', 'You must be logged in to save changes');
+    if (!professionalProfileId) {
+      Alert.alert('Error', 'No professional profile ID found. Please create one.');
       return;
     }
 
     try {
       setIsLoading(true);
 
-      // Validate times
+      // Validate open/close times
       for (const day of DAYS_OF_WEEK) {
         const { openTime, closeTime, isOpen } = schedule[day];
         if (isOpen) {
-          const openMinutes = timeToMinutes(openTime);
-          const closeMinutes = timeToMinutes(closeTime);
-          
-          if (closeMinutes <= openMinutes) {
-            throw new Error(`Invalid hours for ${day}: Closing time must be after opening time`);
+          if (timeToMinutes(closeTime) <= timeToMinutes(openTime)) {
+            throw new Error(
+              `Invalid hours for ${day}: closeTime must be after openTime`
+            );
           }
         }
       }
 
-      // First, get or create the business
-      let { data: business, error: businessError } = await supabase
-        .from('businesses')
-        .select('id')
-        .eq('owner_id', user.id)
-        .single();
+      // Build array for upsert
+      const rowsToUpsert: WorkingHoursInsert[] = DAYS_OF_WEEK.map((day, idx) => {
+        const { isOpen, openTime, closeTime } = schedule[day];
+        return {
+          professional_id: professionalProfileId,
+          day_of_week: toDayNumber(idx),
+          is_open: isOpen,
+          start_time: openTime,
+          end_time: closeTime,
+        };
+      });
 
-      if (businessError) {
-        if (businessError.code === 'PGRST116') {
-          // Create new business if it doesn't exist
-          const { data: newBusiness, error: createError } = await supabase
-            .from('businesses')
-            .insert([
-              {
-                owner_id: user.id,
-                business_hours: schedule,
-                name: 'My Business',
-                status: 'active'
-              }
-            ])
-            .select('id')
-            .single();
+      // Upsert with unique constraint on (professional_id, day_of_week)
+      const { data: upsertData, error: upsertError } = await supabase
+        .from('working_hours')
+        .upsert(rowsToUpsert, { onConflict: 'professional_id,day_of_week' })
+        .select();
 
-          if (createError) throw createError;
-          business = newBusiness;
-        } else {
-          throw businessError;
-        }
+      if (upsertError) {
+        console.error('Upsert error:', upsertError);
+        throw upsertError;
       }
 
-      if (!business) {
-        throw new Error('No business found for this user');
-      }
-
-      // Update the business hours
-      const { error: updateError } = await supabase
-        .from('businesses')
-        .update({ business_hours: schedule })
-        .eq('id', business.id);
-
-      if (updateError) throw updateError;
-
+      console.log('Upserted rows:', upsertData);
       Alert.alert('Success', 'Business hours saved successfully');
-      navigation.goBack();
+
+      // (Optional) Re-fetch to see updated data
+      await fetchProfileAndWorkingHours(user?.id as string);
+
+      // (Optional) Or navigate back
+      // navigation.goBack();
     } catch (error: any) {
-      console.error('Error saving business hours:', error);
+      console.error('Error saving working hours:', error);
       Alert.alert('Error', error.message || 'Failed to save business hours');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const timeToMinutes = (time: string): number => {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-
   const toggleDay = (day: string) => {
     setSchedule(prev => ({
       ...prev,
-      [day]: {
-        ...prev[day],
-        isOpen: !prev[day].isOpen,
-      },
+      [day]: { ...prev[day], isOpen: !prev[day].isOpen },
     }));
   };
 
   const showTimePicker = (day: string, timeType: 'openTime' | 'closeTime') => {
-    const currentTime = schedule[day][timeType];
-    const [hours, minutes] = currentTime.split(':').map(Number);
-    
+    const [hours, minutes] = schedule[day][timeType].split(':').map(Number);
     const date = new Date();
     date.setHours(hours);
     date.setMinutes(minutes);
-    
+
     setTempTime(date);
     setSelectedDay(day);
     setSelectedTimeType(timeType);
@@ -216,26 +285,27 @@ export const BusinessHoursScreen = () => {
     if (Platform.OS === 'android') {
       setShowPicker(false);
     }
-    
-    if (event.type === 'set' && date && selectedDay) {
-      const hours = date.getHours().toString().padStart(2, '0');
-      const minutes = date.getMinutes().toString().padStart(2, '0');
-      const timeString = `${hours}:${minutes}`;
+    if (!selectedDay || !date) return;
+
+    if (event.type === 'set') {
+      const hh = String(date.getHours()).padStart(2, '0');
+      const mm = String(date.getMinutes()).padStart(2, '0');
+      const newTime = `${hh}:${mm}`;
 
       setSchedule(prev => ({
         ...prev,
         [selectedDay]: {
           ...prev[selectedDay],
-          [selectedTimeType]: timeString,
+          [selectedTimeType]: newTime,
         },
       }));
-      
-      if (Platform.OS === 'ios') {
-        setTempTime(date);
-      }
-    } else if (Platform.OS === 'android') {
-      setShowPicker(false);
     }
+  };
+
+  // Convert "HH:mm" to total minutes
+  const timeToMinutes = (time: string): number => {
+    const [hh, mm] = time.split(':').map(Number);
+    return hh * 60 + mm;
   };
 
   const renderTimePicker = () => {
@@ -243,11 +313,7 @@ export const BusinessHoursScreen = () => {
 
     if (Platform.OS === 'ios') {
       return (
-        <Modal
-          transparent
-          visible={showPicker}
-          animationType="slide"
-        >
+        <Modal transparent visible={showPicker} animationType="slide">
           <View style={styles.modalContainer}>
             <View style={styles.modalContent}>
               <View style={styles.pickerHeader}>
@@ -256,7 +322,7 @@ export const BusinessHoursScreen = () => {
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
-                    handleTimeChange({ type: 'set' }, tempTime);
+                    handleTimeChange({ type: 'set' } as DateTimePickerEvent, tempTime);
                     setShowPicker(false);
                   }}
                 >
@@ -266,30 +332,25 @@ export const BusinessHoursScreen = () => {
               <DateTimePicker
                 value={tempTime}
                 mode="time"
+                is24Hour
                 display="spinner"
-                onChange={(event, date) => {
-                  if (date) setTempTime(date);
-                }}
-                is24Hour={true}
-                textColor="#000000"
-                themeVariant="light"
+                onChange={(evt, d) => d && setTempTime(d)}
                 style={styles.timePicker}
+                textColor="black"
+                themeVariant="light"
               />
             </View>
           </View>
         </Modal>
       );
     }
-
     return (
       <DateTimePicker
         value={tempTime}
         mode="time"
-        is24Hour={true}
+        is24Hour
         display="default"
         onChange={handleTimeChange}
-        textColor="#000000"
-        themeVariant="light"
       />
     );
   };
@@ -299,59 +360,28 @@ export const BusinessHoursScreen = () => {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Business Hours</Text>
-          <TouchableOpacity 
-            style={[
-              styles.saveButton,
-              isLoading && styles.saveButtonDisabled
-            ]} 
+          <TouchableOpacity
+            style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={isLoading}
           >
-            <MaterialCommunityIcons name="content-save" size={24} color="#FFFFFF" />
+            <MaterialCommunityIcons name="content-save" size={24} color="#FFF" />
             <Text style={styles.saveButtonText}>
               {isLoading ? 'Saving...' : 'Save'}
             </Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView 
-          style={styles.scheduleContainer}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {DAYS_OF_WEEK.map((day) => (
-            <View key={day} style={styles.dayRow}>
-              <View style={styles.dayHeader}>
-                <Text style={styles.dayText}>{day}</Text>
-                <Switch
-                  value={schedule[day].isOpen}
-                  onValueChange={() => toggleDay(day)}
-                  trackColor={{ false: '#767577', true: '#FF5722' }}
-                  thumbColor={schedule[day].isOpen ? '#fff' : '#f4f3f4'}
-                  disabled={isLoading}
-                />
-              </View>
-              <View style={styles.hoursContainer}>
-                <TouchableOpacity 
-                  style={styles.timeButton}
-                  onPress={() => showTimePicker(day, 'openTime')}
-                  disabled={isLoading}
-                >
-                  <Text style={styles.timeButtonText}>
-                    Opens: {schedule[day].openTime}
-                  </Text>
-                </TouchableOpacity>
-                <Text style={styles.timeSeparator}>-</Text>
-                <TouchableOpacity 
-                  style={styles.timeButton}
-                  onPress={() => showTimePicker(day, 'closeTime')}
-                  disabled={isLoading}
-                >
-                  <Text style={styles.timeButtonText}>
-                    Closes: {schedule[day].closeTime}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+        <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
+          {DAYS_OF_WEEK.map(day => (
+            <DayRow
+              key={day}
+              day={day}
+              schedule={schedule}
+              toggleDay={toggleDay}
+              showTimePicker={showTimePicker}
+              isLoading={isLoading}
+            />
           ))}
         </ScrollView>
 
@@ -364,118 +394,106 @@ export const BusinessHoursScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF',
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    padding: 16,
+    borderBottomColor: '#EEE',
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
   },
   saveButton: {
-    backgroundColor: '#FF5722',
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: '#FF5722',
     borderRadius: 8,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
   saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#FFF',
     marginLeft: 8,
   },
-  scheduleContainer: {
+  scrollContainer: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 16,
+  },
   dayRow: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomColor: '#EEE',
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
   dayText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#333333',
+    color: '#333',
   },
-  hoursContainer: {
+  timesRow: {
     flexDirection: 'row',
+    marginTop: 10,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    gap: 10,
   },
   timeButton: {
-    backgroundColor: '#F5F5F5',
+    flex: 1,
+    backgroundColor: '#EAEAEA',
     padding: 12,
     borderRadius: 6,
-    flex: 1,
+    borderWidth: 1,
+    borderColor: '#DDD',
+  },
+  disabledButton: {
+    opacity: 0.7,
+    backgroundColor: '#F5F5F5',
   },
   timeButtonText: {
-    fontSize: 14,
-    color: '#333333',
     textAlign: 'center',
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
   },
-  timeSeparator: {
+  separator: {
     fontSize: 16,
-    color: '#333333',
     fontWeight: '500',
-  },
-  centered: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  hoursContainerClosed: {
-    opacity: 0.5,
-  },
-  timeButtonDisabled: {
-    backgroundColor: '#EEEEEE',
+    color: '#333',
   },
   modalContainer: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   modalContent: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
     paddingBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   pickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 16,
+    borderBottomColor: '#EEE',
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
   },
   cancelButton: {
-    color: '#666666',
+    color: '#666',
     fontSize: 16,
   },
   doneButton: {
@@ -484,13 +502,41 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   timePicker: {
+    backgroundColor: '#FFF',
     height: 200,
-    backgroundColor: '#FFFFFF',
   },
-  scrollContent: {
-    paddingBottom: 16,
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  saveButtonDisabled: {
-    opacity: 0.7,
+  statusText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  openText: {
+    color: '#4CAF50',
+  },
+  closedText: {
+    color: '#FF5722',
+  },
+  depositContainer: {
+    padding: 16,
+    borderBottomColor: '#EEE',
+    borderBottomWidth: 1,
+  },
+  depositLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 8,
+  },
+  depositInput: {
+    backgroundColor: '#EAEAEA',
+    padding: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#DDD',
+    fontSize: 16,
   },
 });

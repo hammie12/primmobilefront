@@ -25,6 +25,9 @@ interface RouteParams {
   selectedTime: string;
   professionalId: string;
   serviceId: string;
+  isRescheduling?: boolean;
+  originalBookingId?: string;
+  originalBookingStatus?: string;
 }
 
 type RootStackParamList = {
@@ -46,7 +49,27 @@ export const BookingPayment = () => {
     selectedTime,
     professionalId,
     serviceId,
+    isRescheduling,
+    originalBookingId,
+    originalBookingStatus
   } = route.params as RouteParams;
+
+  console.log('=== BookingPayment State ===');
+  console.log('Route Params:', route.params);
+  console.log('Is Rescheduling:', isRescheduling);
+  console.log('Original Booking ID:', originalBookingId);
+  console.log('Original Booking Status:', originalBookingStatus);
+  console.log('Booking Details:', {
+    serviceName,
+    servicePrice,
+    serviceDuration,
+    professionalName,
+    selectedDate,
+    selectedTime,
+    professionalId,
+    serviceId
+  });
+  console.log('========================');
 
   const { user } = useAuth();
 
@@ -71,11 +94,14 @@ export const BookingPayment = () => {
         return;
       }
 
-      console.log('Starting booking creation process...', {
+      console.log('Starting booking process...', {
         selectedDate,
         selectedTime,
         serviceDuration,
-        professionalId
+        professionalId,
+        isRescheduling,
+        originalBookingId,
+        originalBookingStatus
       });
 
       // Get customer profile id
@@ -170,31 +196,53 @@ export const BookingPayment = () => {
         localEndTime: endDateTime.toLocaleString()
       });
 
-      // Step 1: Create the booking with minimal fields
-      const { data: bookingData, error: bookingError } = await supabase
-        .rpc('create_simple_booking', {
-          p_customer_id: customerProfile.id,
-          p_professional_id: professionalProfileId,
-          p_service_id: serviceId,
-          p_start_time: startDateTime.toISOString(),
-          p_end_time: endDateTime.toISOString()
-        });
+      if (isRescheduling && originalBookingId) {
+        // Call the reschedule_booking RPC function
+        const { data: bookingData, error: bookingError } = await supabase
+          .rpc('reschedule_booking', {
+            p_booking_id: originalBookingId,
+            p_new_start_time: startDateTime.toISOString(),
+            p_new_end_time: endDateTime.toISOString()
+          });
 
-      if (bookingError) {
-        console.error('Booking creation error details:', {
-          code: bookingError.code,
-          message: bookingError.message,
-          details: bookingError.details
-        });
-        Alert.alert('Error', 'Failed to create booking. Please try again.');
-        return;
+        if (bookingError) {
+          console.error('Booking reschedule error details:', {
+            code: bookingError.code,
+            message: bookingError.message,
+            details: bookingError.details
+          });
+          Alert.alert('Error', 'Failed to reschedule booking. Please try again.');
+          return;
+        }
+
+        console.log('Booking rescheduled successfully:', bookingData);
+      } else {
+        // Create a new booking
+        const { data: bookingData, error: bookingError } = await supabase
+          .rpc('create_simple_booking', {
+            p_customer_id: customerProfile.id,
+            p_professional_id: professionalProfileId,
+            p_service_id: serviceId,
+            p_start_time: startDateTime.toISOString(),
+            p_end_time: endDateTime.toISOString()
+          });
+
+        if (bookingError) {
+          console.error('Booking creation error details:', {
+            code: bookingError.code,
+            message: bookingError.message,
+            details: bookingError.details
+          });
+          Alert.alert('Error', 'Failed to create booking. Please try again.');
+          return;
+        }
+
+        console.log('Booking created successfully:', bookingData);
       }
-
-      console.log('Booking created successfully:', bookingData);
 
       // Success
       navigation.navigate('CustomerBookings');
-      Alert.alert('Success', 'Your booking has been created!');
+      Alert.alert('Success', isRescheduling ? 'Your booking has been rescheduled!' : 'Your booking has been created!');
     } catch (error) {
       console.error('Error in booking creation:', error);
       Alert.alert('Error', 'An unexpected error occurred. Please try again.');

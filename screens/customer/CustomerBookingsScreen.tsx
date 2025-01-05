@@ -9,6 +9,7 @@ import {
   RefreshControl,
   findNodeHandle,
   Alert,
+  Location,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -22,8 +23,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { showMessage } from 'react-native-flash-message';
 import Modal from 'react-native-modal';
+import { Database } from '../../lib/supabase/schema';
 
 const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=0D8ABC&color=fff';
+
+// Add type for the address JSON structure
+type AddressJson = {
+  street?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+} | string;  // Include string type since it might be stored as a string
 
 type Booking = {
   id: string;
@@ -33,6 +43,11 @@ type Booking = {
     last_name: string;
     profile_image: string | null;
     business_name: string;
+    user: {
+      professionals: {
+        address: string | null;
+      }[];
+    } | null;
   };
   professional_profile: {
     id: string;
@@ -40,16 +55,22 @@ type Booking = {
     last_name: string;
     profile_image: string | null;
     business_name: string;
+    user: {
+      professionals: {
+        address: string | null;
+      }[];
+    } | null;
   };
   service: {
     id: string;
     name: string;
     price: number;
     duration: number;
+    professional_id: string;
   } | null;
   start_time: string;
   end_time: string;
-  status: string;
+  status: Database["public"]["Enums"]["booking_status"];
   notes: string | null;
 };
 
@@ -140,6 +161,75 @@ type BookingDetails = {
   notes: string | null;
 };
 
+// Add a helper function to format the address
+const formatAddress = (address: AddressJson | null): string => {
+  if (!address) return 'Location not available';
+  
+  if (typeof address === 'string') {
+    return address;
+  }
+
+  const { street, city, state } = address;
+  if (street && city) {
+    return `${street}, ${city}${state ? `, ${state}` : ''}`;
+  }
+  
+  return 'Location not available';
+};
+
+// Add a helper function to format the address string
+const formatLocation = (address: string | null): string => {
+  if (!address) return 'Location not available';
+  
+  try {
+    const addressObj = JSON.parse(address);
+    
+    // If we have address lines, format them with city and state
+    if (addressObj.address_line1) {
+      const line2 = addressObj.address_line2 ? `, ${addressObj.address_line2}` : '';
+      return `${addressObj.address_line1}${line2}, ${addressObj.city}, ${addressObj.state}`;
+    }
+    
+    // If no address lines, use postcode as fallback
+    if (addressObj.postcode || addressObj.postal_code) {
+      return `${addressObj.city}, ${addressObj.postcode || addressObj.postal_code}`;
+    }
+    
+    // If we only have city and state
+    if (addressObj.city && addressObj.state) {
+      return `${addressObj.city}, ${addressObj.state}`;
+    }
+    
+    // If nothing else works, return the raw address
+    return address;
+  } catch {
+    // If parsing fails, return the address as is
+    return address;
+  }
+};
+
+const getCoordinatesFromAddress = async (address: string) => {
+  try {
+    const geocodedLocation = await Location.geocodeAsync(address);
+    if (geocodedLocation && geocodedLocation.length > 0) {
+      const { latitude, longitude } = geocodedLocation[0];
+      return { latitude, longitude };
+    }
+    return null;
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    return null;
+  }
+};
+
+// Add this type for reviews
+type Review = {
+  id: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+};
+
 export const CustomerBookingsScreen = ({ route }: { route: any }) => {
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -161,32 +251,43 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
   const confirmReschedule = async () => {
     if (selectedBooking && selectedBooking.service) {
       try {
-        console.log('Selected Booking Data:', {
-          booking: selectedBooking,
-          professionalProfiles: selectedBooking.professional_profiles,
-          service: selectedBooking.service,
-          professionalId: selectedBooking.professional_profiles.id
+        console.log('Starting reschedule process:', {
+          isRescheduling: true,
+          selectedBookingId: selectedBooking.id,
+          bookingStatus: selectedBooking.status,
+          serviceDetails: {
+            name: selectedBooking.service.name,
+            price: selectedBooking.service.price,
+            duration: selectedBooking.service.duration
+          }
         });
 
-        const professionalId = selectedBooking.professional_profiles.id;
-        console.log('Fetching business hours for professional:', professionalId);
-
-        // Log the full booking data to see all available IDs
-        console.log('Full booking data:', JSON.stringify(selectedBooking, null, 2));
-
-        // Direct fetch from professionals table like CustomerViewProfessionalScreen
-        const { data: profile, error } = await supabase
-          .from('professionals')
-          .select('*, business_hours')
-          .eq('id', professionalId)
+        // First get the professional profile to get the user_id
+        const { data: profProfile, error: profileError } = await supabase
+          .from('professional_profiles')
+          .select('user_id')
+          .eq('id', selectedBooking.professional_profiles.id)
           .single();
 
-        if (error) {
-          console.log('Error fetching professional profile, using default hours:', {
-            error,
-            professionalId,
-            bookingData: selectedBooking
-          });
+        if (profileError) {
+          console.error('Error fetching professional profile:', profileError);
+          throw profileError;
+        }
+
+        if (!profProfile?.user_id) {
+          throw new Error('No user_id found for professional profile');
+        }
+
+        // Then get the professional record using the user_id
+        const { data: professional, error: profError } = await supabase
+          .from('professionals')
+          .select('*, business_hours')
+          .eq('user_id', profProfile.user_id)
+          .single();
+
+        if (profError) {
+          console.error('Error fetching professional:', profError);
+          throw profError;
         }
 
         // Default business hours structure
@@ -201,27 +302,37 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
         };
 
         // Use business hours from profile or default if not found
-        const businessHours = profile?.business_hours || defaultHours;
+        const businessHours = professional?.business_hours || defaultHours;
 
-        console.log('Business hours configuration:', {
-          usingDefault: !profile?.business_hours,
-          hours: businessHours
+        console.log('Navigating to BookingScreen with params:', {
+          professionalId: professional.id,
+          serviceName: selectedBooking.service.name,
+          servicePrice: selectedBooking.service.price,
+          serviceDuration: selectedBooking.service.duration,
+          professionalName: selectedBooking.professional_profiles.business_name,
+          serviceId: selectedBooking.service.id,
+          isRescheduling: true,
+          originalBookingId: selectedBooking.id,
+          originalBookingStatus: selectedBooking.status
         });
 
         // Navigate to BookingScreen with all required data
         navigation.navigate('Booking', {
-          professionalId: selectedBooking.professional_profiles.id,
+          professionalId: professional.id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
           serviceDuration: selectedBooking.service.duration.toString(),
           professionalName: selectedBooking.professional_profiles.business_name,
           serviceId: selectedBooking.service.id,
-          workingHours: businessHours
+          workingHours: businessHours,
+          isRescheduling: true,
+          originalBookingId: selectedBooking.id,
+          originalBookingStatus: selectedBooking.status
         });
 
         setIsRescheduleModalVisible(false);
       } catch (error) {
-        console.log('Error in reschedule process, using default hours:', error);
+        console.error('Error in reschedule process:', error);
         
         // Use default hours if there's an error
         const defaultHours = {
@@ -234,8 +345,9 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           Sunday: { isOpen: false, openTime: '09:00', closeTime: '17:00' }
         };
 
+        // In error case, use the service's professional_id
         navigation.navigate('Booking', {
-          professionalId: selectedBooking.professional_profiles.id,
+          professionalId: selectedBooking.service.professional_id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
           serviceDuration: selectedBooking.service.duration.toString(),
@@ -356,15 +468,27 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
             id,
             first_name,
             last_name,
-            profile_image,
-            business_name
+            business_name,
+            user_id,
+            user:user_id (
+              professionals!user_id (
+                id,
+                profile_image,
+                business_name,
+                about,
+                rating,
+                category,
+                address
+              )
+            )
           ),
           service:service_id (
             id,
             name,
             price,
             duration,
-            professional_id
+            professional_id,
+            category
           )
         `)
         .eq('customer_id', customerProfile.id);
@@ -376,8 +500,9 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           .gte('start_time', now)
           .order('start_time', { ascending: true });
       } else {
+        // Past bookings should include COMPLETED and CANCELLED status
         query
-          .eq('status', 'COMPLETED')
+          .in('status', ['COMPLETED', 'CANCELLED'])
           .lt('start_time', now)
           .order('start_time', { ascending: false });
       }
@@ -397,25 +522,32 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
         return;
       }
 
-      // Filter out any bookings without professional profiles
+      // Only filter out bookings without professional profiles
       const validBookings = data.filter(booking => 
         booking.professional_profiles && 
-        booking.professional_profiles.business_name &&
-        booking.service
+        booking.professional_profiles.business_name
       );
       
       console.log('Valid bookings after filter:', validBookings);
       
       const formattedBookings = validBookings.map(booking => ({
         ...booking,
-        professional_profile: booking.professional_profiles,
+        professional_profile: {
+          ...booking.professional_profiles,
+          profile_image: booking.professional_profiles.user?.professionals?.[0]?.profile_image || null,
+          business_name: booking.professional_profiles.user?.professionals?.[0]?.business_name || booking.professional_profiles.business_name,
+          about: booking.professional_profiles.user?.professionals?.[0]?.about,
+          rating: booking.professional_profiles.user?.professionals?.[0]?.rating,
+          category: booking.professional_profiles.user?.professionals?.[0]?.category
+        },
         professional_profiles: booking.professional_profiles,
         service: booking.service || {
           id: 'unknown',
           name: booking.notes?.replace('Service: ', '') || 'Service Unavailable',
           price: 0,
           duration: 30,
-          professional_id: booking.professional_profiles.id
+          professional_id: booking.professional_profiles.id,
+          category: booking.professional_profiles.user?.professionals?.[0]?.category
         }
       }));
 
@@ -423,7 +555,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
       setBookings(formattedBookings);
     } catch (error) {
       console.error('Error in fetchBookings:', error);
-      setBookings([]); // Set empty array on error
+      setBookings([]);
     } finally {
       setIsLoading(false);
     }
@@ -510,10 +642,21 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
     const endTime = new Date(booking.end_time);
 
     const handleProfessionalPress = () => {
-      navigation.navigate('CustomerViewProfessional', {
-        professionalId: booking.professional_profiles.id,
-        name: booking.professional_profiles.business_name,
-      });
+      // Get the professional ID from the same path as handleBookAgain
+      const professional = booking.professional_profiles?.user?.professionals?.[0];
+      
+      if (professional?.id) {
+        navigation.navigate('CustomerViewProfessional', {
+          professionalId: professional.id,
+          name: booking.professional_profiles.business_name
+        });
+      } else {
+        console.error('No professional ID found in booking:', booking.professional_profiles);
+        showMessage({
+          message: "Could not find professional details",
+          type: "danger"
+        });
+      }
     };
 
     return (
@@ -523,7 +666,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
       >
         <TouchableOpacity 
           style={styles.bookingHeader}
-          onPress={handleProfessionalPress}
+          onPress={() => handleProfessionalPress(booking)}
         >
           <Image
             source={{ 
@@ -534,10 +677,29 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           />
           <View style={styles.bookingInfo}>
             <Typography variant="body1" style={styles.professionalName}>
-              {booking.professional_profile.business_name || 
-                `${booking.professional_profile.first_name} ${booking.professional_profile.last_name}`}
+              {booking.professional_profile.business_name}
             </Typography>
             <View style={styles.serviceDetailsContainer}>
+              <View style={styles.categoryContainer}>
+                <MaterialCommunityIcons 
+                  name={
+                    booking.professional_profile.category?.toLowerCase() === 'hair' ? 'content-cut' :
+                    booking.professional_profile.category?.toLowerCase() === 'nails' ? 'hand-back-right-outline' :
+                    booking.professional_profile.category?.toLowerCase() === 'lashes' ? 'eye' : 'store'
+                  }
+                  size={16} 
+                  color="#FF5722" 
+                />
+                <Typography variant="caption" style={styles.categoryText}>
+                  {booking.professional_profile.category?.toUpperCase()}
+                </Typography>
+              </View>
+              <View style={styles.ratingContainer}>
+                <MaterialCommunityIcons name="star" size={16} color="#FFD700" />
+                <Typography variant="caption" style={styles.rating}>
+                  {booking.professional_profile.rating || 'N/A'}
+                </Typography>
+              </View>
               <View style={styles.serviceContainer}>
                 <MaterialCommunityIcons 
                   name="content-cut" 
@@ -579,7 +741,7 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           <View style={styles.detailRow}>
             <MaterialCommunityIcons name="map-marker" size={20} color="#FF5722" />
             <Typography variant="body2" style={styles.detailText}>
-              {booking.professional_profile.business_name || '123 Professional St, London'}
+              {formatLocation(booking.professional_profile.user?.professionals?.[0]?.address)}
             </Typography>
           </View>
         </View>
@@ -615,13 +777,19 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
 
         {activeTab === 'past' && (
           <View style={styles.bookingActions}>
-            <TouchableOpacity style={styles.actionButton}>
-              <MaterialCommunityIcons name="star" size={20} color="#FF5722" />
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleReviewSubmit(booking)}
+            >
+              <MaterialCommunityIcons name="star-outline" size={20} color="#FF5722" />
               <Typography variant="body2" style={styles.actionButtonText}>
                 Leave Review
               </Typography>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleBookAgain(booking)}
+            >
               <MaterialCommunityIcons name="calendar-plus" size={20} color="#FF5722" />
               <Typography variant="body2" style={styles.actionButtonText}>
                 Book Again
@@ -631,6 +799,45 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
         )}
       </View>
     );
+  };
+
+  // Add function to handle review submission
+  const handleReviewSubmit = async (booking: Booking) => {
+    try {
+      // Navigate to review screen with booking details
+      navigation.navigate('WriteReview', {
+        bookingId: booking.id,
+        professionalId: booking.professional_profiles.id,
+        professionalName: booking.professional_profiles.business_name,
+        serviceId: booking.service?.id,
+        serviceName: booking.service?.name
+      });
+    } catch (error) {
+      console.error('Error navigating to review:', error);
+      showMessage({
+        message: "Failed to open review form",
+        type: "danger"
+      });
+    }
+  };
+
+  // Update the handleBookAgain function
+  const handleBookAgain = (booking: Booking) => {
+    // Get the professional ID from the same path we get the business name and profile image
+    const professional = booking.professional_profiles?.user?.professionals?.[0];
+    
+    if (professional?.id) {
+      navigation.navigate('CustomerViewProfessional', {
+        professionalId: professional.id,
+        name: booking.professional_profiles.business_name
+      });
+    } else {
+      console.error('No professional ID found in booking:', booking.professional_profiles);
+      showMessage({
+        message: "Could not find professional details",
+        type: "danger"
+      });
+    }
   };
 
   return (
@@ -963,5 +1170,63 @@ const styles = StyleSheet.create({
   confirmActionButtonText: {
     color: 'white',
     fontWeight: '600',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  locationText: {
+    marginLeft: 4,
+    color: '#666666',
+    fontSize: 14,
+  },
+  categoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  categoryText: {
+    color: '#FF5722',
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  rating: {
+    marginLeft: 4,
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  pastBookingStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  statusText: {
+    marginLeft: 4,
+    color: '#666',
+    fontSize: 12,
+  },
+  completedStatus: {
+    backgroundColor: '#E8F5E9',
+  },
+  completedStatusText: {
+    color: '#2E7D32',
+  },
+  cancelledStatus: {
+    backgroundColor: '#FFEBEE',
+  },
+  cancelledStatusText: {
+    color: '#C62828',
   },
 });

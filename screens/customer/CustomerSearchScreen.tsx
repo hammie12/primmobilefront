@@ -21,6 +21,19 @@ import { supabase } from '../../lib/supabase';
 import { Professional, Category } from '../../types/schema';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+type RootStackParamList = {
+  CustomerViewProfessional: {
+    professionalId: string;
+    name: string;
+    rating?: number;
+    category?: string;
+    description?: string;
+  };
+};
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'CustomerViewProfessional'>;
 
 const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371; // Earth's radius in km
@@ -58,9 +71,10 @@ export const CustomerSearchScreen = () => {
     longitudeDelta: 0.0421,
   });
   const [errorMsg, setErrorMsg] = useState(null);
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [categories] = useState([
+    { id: 0, name: 'ALL', icon: 'view-grid' },
     { id: 1, name: 'HAIR', icon: 'content-cut' },
     { id: 2, name: 'NAILS', icon: 'hand-back-right-outline' },
     { id: 3, name: 'LASHES', icon: 'eye' },
@@ -83,7 +97,7 @@ export const CustomerSearchScreen = () => {
         ) : Infinity
     }))
     .filter(service => {
-      const matchesCategory = !selectedCategory || service.category?.toUpperCase() === selectedCategory;
+      const matchesCategory = !selectedCategory || selectedCategory === 'ALL' || service.category?.toUpperCase() === selectedCategory;
       const searchLower = searchQuery.toLowerCase();
       const matchesSearch = !searchQuery || 
         service.business_name?.toLowerCase().includes(searchLower) ||
@@ -226,10 +240,10 @@ export const CustomerSearchScreen = () => {
           )}
           <Typography 
             variant="caption" 
-            style={[
+            style={StyleSheet.flatten([
               styles.categoryName,
               selectedCategory === category.name && styles.selectedCategoryName
-            ]}
+            ])}
           >
             {category.name}
           </Typography>
@@ -267,13 +281,13 @@ export const CustomerSearchScreen = () => {
               </View>
             </View>
             <Callout tooltip onPress={() => {
-              navigation.navigate('CustomerViewProfessional' as never, { 
+              navigation.navigate('CustomerViewProfessional', {
                 professionalId: service.id,
                 name: service.business_name,
                 rating: service.rating,
                 category: service.category,
                 description: service.about
-              } as never);
+              });
             }}>
               <View style={styles.calloutContainer}>
                 <View style={styles.calloutContent}>
@@ -320,10 +334,32 @@ export const CustomerSearchScreen = () => {
                     </Typography>
                   </View>
                   <View style={styles.viewProfileButton}>
-                    <Typography variant="button" style={styles.viewProfileButtonText}>
+                    <Typography variant="buttonText" style={styles.viewProfileButtonText}>
                       View Profile
                     </Typography>
                   </View>
+                  {service.availability && (
+                    <View style={styles.calloutAvailability}>
+                      <MaterialCommunityIcons name="clock-outline" size={16} color="#666" />
+                      <Typography variant="caption" style={styles.calloutAvailabilityText}>
+                        {`${service.availability.hours.start} - ${service.availability.hours.end}`}
+                      </Typography>
+                    </View>
+                  )}
+                  {service.services && service.services.length > 0 && (
+                    <View style={styles.calloutServices}>
+                      {service.services.slice(0, 2).map((serviceItem, index) => (
+                        <Typography key={index} variant="caption" style={styles.calloutService}>
+                          {`${serviceItem.name} (${serviceItem.duration}min) - £${serviceItem.price}`}
+                        </Typography>
+                      ))}
+                      {service.services.length > 2 && (
+                        <Typography variant="caption" style={styles.calloutMoreServices}>
+                          {`+${service.services.length - 2} more services`}
+                        </Typography>
+                      )}
+                    </View>
+                  )}
                 </View>
               </View>
             </Callout>
@@ -385,19 +421,125 @@ export const CustomerSearchScreen = () => {
             <TouchableOpacity
               style={styles.viewProfileButtonList}
               onPress={() => {
-                navigation.navigate('CustomerViewProfessional' as never, { 
+                navigation.navigate('CustomerViewProfessional', {
                   professionalId: service.id,
                   name: service.business_name,
                   rating: service.rating,
                   category: service.category,
                   description: service.about
-                } as never);
+                });
               }}
             >
-              <Typography variant="button" style={styles.viewProfileButtonText}>
+              <Typography variant="buttonText" style={styles.viewProfileButtonText}>
                 View Profile
               </Typography>
             </TouchableOpacity>
+            {service.availability && (
+              <View style={styles.availabilitySection}>
+                <View style={styles.availabilityHeader}>
+                  <MaterialCommunityIcons name="clock-outline" size={16} color="#FF5722" />
+                  <Typography variant="caption" style={styles.availabilityHeaderText}>
+                    Available Hours & Appointments
+                  </Typography>
+                </View>
+                
+                <View style={styles.availabilityDetails}>
+                  <View style={styles.availabilityTime}>
+                    <Typography variant="caption" style={styles.availabilityLabel}>
+                      Hours:
+                    </Typography>
+                    <Typography variant="caption" style={styles.availabilityText}>
+                      {`${service.availability.hours.start} - ${service.availability.hours.end}`}
+                    </Typography>
+                  </View>
+                  
+                  <View style={styles.availabilityDaysContainer}>
+                    <Typography variant="caption" style={styles.availabilityLabel}>
+                      Days:
+                    </Typography>
+                    <Typography variant="caption" style={styles.availabilityDays}>
+                      {service.availability.days.join(', ')}
+                    </Typography>
+                  </View>
+                </View>
+
+                {service.availability.appointments && service.availability.appointments.length > 0 && (
+                  <View style={styles.appointmentsContainer}>
+                    <Typography variant="subtitle2" style={styles.appointmentsTitle}>
+                      Next Available Slots
+                    </Typography>
+                    {service.availability.appointments.slice(0, 3).map((appointment, index) => (
+                      <View key={index} style={styles.appointmentItem}>
+                        <View style={styles.appointmentMainInfo}>
+                          <View style={styles.appointmentDateContainer}>
+                            <MaterialCommunityIcons name="calendar" size={16} color="#FF5722" />
+                            <Typography variant="caption" style={styles.appointmentDate}>
+                              {appointment.date}
+                            </Typography>
+                          </View>
+                          <View style={styles.appointmentTimeWrapper}>
+                            <MaterialCommunityIcons name="clock-outline" size={16} color="#666" />
+                            <Typography variant="caption" style={styles.appointmentTime}>
+                              {appointment.time}
+                            </Typography>
+                          </View>
+                        </View>
+                        
+                        <View style={styles.appointmentDetails}>
+                          <View style={styles.appointmentServiceContainer}>
+                            <MaterialCommunityIcons 
+                              name={
+                                appointment.service.toLowerCase().includes('hair') ? 'content-cut' :
+                                appointment.service.toLowerCase().includes('nail') ? 'hand-back-right-outline' :
+                                'spa'
+                              } 
+                              size={16} 
+                              color="#666" 
+                            />
+                            <Typography variant="caption" style={styles.appointmentService}>
+                              {appointment.service}
+                            </Typography>
+                          </View>
+                          
+                          <View style={[
+                            styles.appointmentStatus,
+                            { backgroundColor: appointment.status === 'confirmed' ? '#E8F5E9' : '#FFF3E0' }
+                          ]}>
+                            <Typography variant="caption" style={[
+                              styles.appointmentStatusText,
+                              { color: appointment.status === 'confirmed' ? '#2E7D32' : '#EF6C00' }
+                            ]}>
+                              {appointment.status.charAt(0).toUpperCase() + appointment.status.slice(1)}
+                            </Typography>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+            {service.services && service.services.length > 0 && (
+              <View style={styles.servicesContainer}>
+                {service.services.map((serviceItem, index) => (
+                  <View key={index} style={styles.serviceItem}>
+                    <Typography variant="caption" style={styles.serviceName}>
+                      {serviceItem.name}
+                    </Typography>
+                    {serviceItem.duration && (
+                      <Typography variant="caption" style={styles.serviceDuration}>
+                        {`${serviceItem.duration} min`}
+                      </Typography>
+                    )}
+                    {serviceItem.price && (
+                      <Typography variant="caption" style={styles.servicePrice}>
+                        {`£${serviceItem.price}`}
+                      </Typography>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         </View>
       ))}
@@ -415,13 +557,13 @@ export const CustomerSearchScreen = () => {
               key={service.id}
               style={styles.suggestionItem}
               onPress={() => {
-                navigation.navigate('CustomerViewProfessional' as never, {
+                navigation.navigate('CustomerViewProfessional', {
                   professionalId: service.id,
                   name: service.business_name,
                   rating: service.rating,
                   category: service.category,
                   description: service.about
-                } as never);
+                });
                 setSearchQuery('');
                 setIsSearchFocused(false);
               }}
@@ -919,5 +1061,200 @@ const styles = StyleSheet.create({
   },
   noSuggestionsText: {
     color: '#666',
+  },
+  availabilityContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: '#F8F8F8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  availabilityText: {
+    marginLeft: 6,
+    color: '#666',
+    fontWeight: '500',
+  },
+  availabilityDays: {
+    marginLeft: 8,
+    color: '#666',
+    fontWeight: '400',
+  },
+  servicesContainer: {
+    marginTop: 8,
+  },
+  serviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    backgroundColor: '#FFF8F6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFE5E0',
+  },
+  serviceName: {
+    flex: 1,
+    color: '#1A1A1A',
+    fontWeight: '500',
+  },
+  serviceDuration: {
+    marginHorizontal: 8,
+    color: '#666',
+  },
+  servicePrice: {
+    color: '#FF5722',
+    fontWeight: '600',
+  },
+  calloutAvailability: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  calloutAvailabilityText: {
+    marginLeft: 6,
+    color: '#666',
+  },
+  calloutServices: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  calloutService: {
+    color: '#666',
+    marginBottom: 2,
+  },
+  calloutMoreServices: {
+    color: '#FF5722',
+    marginTop: 2,
+  },
+  availabilitySection: {
+    marginTop: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  availabilityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  availabilityHeaderText: {
+    marginLeft: 8,
+    color: '#FF5722',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  availabilityDetails: {
+    backgroundColor: '#FFF8F6',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  availabilityTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  availabilityDaysContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  availabilityLabel: {
+    color: '#666',
+    fontWeight: '600',
+    marginRight: 8,
+    fontSize: 13,
+  },
+  availabilityText: {
+    color: '#1A1A1A',
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  appointmentsContainer: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingTop: 16,
+  },
+  appointmentsTitle: {
+    color: '#1A1A1A',
+    fontWeight: '600',
+    marginBottom: 12,
+    fontSize: 14,
+  },
+  appointmentItem: {
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  appointmentMainInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  appointmentDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  appointmentTimeWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  appointmentDate: {
+    marginLeft: 6,
+    color: '#1A1A1A',
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  appointmentTime: {
+    marginLeft: 6,
+    color: '#666',
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  appointmentDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  appointmentServiceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  appointmentService: {
+    marginLeft: 8,
+    color: '#1A1A1A',
+    fontSize: 13,
+    flex: 1,
+  },
+  appointmentStatus: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 12,
+  },
+  appointmentStatusText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, CommonActions } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { AppRegistry, Platform, View, Text } from 'react-native';
@@ -28,6 +28,8 @@ import { ServiceDetailsScreen } from './screens/customer/ServiceDetailsScreen';
 import { BookingScreen } from './screens/customer/BookingScreen';
 import { BookingPayment } from './screens/customer/BookingPayment';
 import { CustomerPaymentScreen } from './screens/customer/CustomerPaymentScreen';
+import { DepositInformationScreen } from './screens/customer/DepositInformationScreen';
+import { WriteReviewScreen } from './screens/customer/WriteReviewScreen';
 
 // Professional/Business Screens
 import { BusinessDashboardScreen } from './screens/BusinessDashboardScreen';
@@ -52,6 +54,45 @@ import { ContactSupportScreen } from './screens/settings/ContactSupportScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+const HomeStack = createStackNavigator();
+const SearchStack = createStackNavigator();
+const BookingsStack = createStackNavigator();
+const RewardsStack = createStackNavigator();
+const SettingsStack = createStackNavigator();
+
+// Home Stack
+const CustomerHomeStackScreen = () => (
+  <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+    <HomeStack.Screen name="CustomerHomeMain" component={CustomerHomeScreen} />
+    <HomeStack.Screen name="CustomerViewProfessional" component={CustomerViewProfessionalScreen} />
+    <HomeStack.Screen name="ServiceDetails" component={ServiceDetailsScreen} />
+    <HomeStack.Screen name="Booking" component={BookingScreen} />
+    <HomeStack.Screen name="BookingPayment" component={BookingPayment} />
+  </HomeStack.Navigator>
+);
+
+// Search Stack
+const CustomerSearchStackScreen = () => (
+  <SearchStack.Navigator screenOptions={{ headerShown: false }}>
+    <SearchStack.Screen name="CustomerSearchMain" component={CustomerSearchScreen} />
+    <SearchStack.Screen name="CustomerViewProfessional" component={CustomerViewProfessionalScreen} />
+    <SearchStack.Screen name="ServiceDetails" component={ServiceDetailsScreen} />
+    <SearchStack.Screen name="Booking" component={BookingScreen} />
+    <SearchStack.Screen name="BookingPayment" component={BookingPayment} />
+  </SearchStack.Navigator>
+);
+
+// Bookings Stack
+const CustomerBookingsStackScreen = () => (
+  <BookingsStack.Navigator screenOptions={{ headerShown: false }}>
+    <BookingsStack.Screen name="CustomerBookingsMain" component={CustomerBookingsScreen} />
+    <BookingsStack.Screen name="CustomerViewProfessional" component={CustomerViewProfessionalScreen} />
+    <BookingsStack.Screen name="ServiceDetails" component={ServiceDetailsScreen} />
+    <BookingsStack.Screen name="Booking" component={BookingScreen} />
+    <BookingsStack.Screen name="BookingPayment" component={BookingPayment} />
+    <BookingsStack.Screen name="WriteReview" component={WriteReviewScreen} />
+  </BookingsStack.Navigator>
+);
 
 // Customer Tab Navigator
 const CustomerTabs = () => (
@@ -111,17 +152,17 @@ const CustomerTabs = () => (
   >
     <Tab.Screen 
       name="CustomerHome" 
-      component={CustomerHomeScreen}
+      component={CustomerHomeStackScreen}
       options={{ title: 'Home' }}
     />
     <Tab.Screen 
       name="CustomerSearch" 
-      component={CustomerSearchScreen}
+      component={CustomerSearchStackScreen}
       options={{ title: 'Search' }}
     />
     <Tab.Screen 
       name="CustomerBookings" 
-      component={CustomerBookingsScreen}
+      component={CustomerBookingsStackScreen}
       options={{ title: 'Bookings' }}
     />
     <Tab.Screen 
@@ -133,14 +174,6 @@ const CustomerTabs = () => (
       name="CustomerSettings" 
       component={CustomerSettingsScreen}
       options={{ title: 'Settings' }}
-    />
-    <Tab.Screen 
-      name="CustomerViewProfessional" 
-      component={CustomerViewProfessionalScreen}
-      options={{ 
-        title: 'Professional',
-        tabBarButton: () => null // Hide this tab from the bottom bar
-      }}
     />
   </Tab.Navigator>
 );
@@ -266,6 +299,15 @@ const Navigation = () => {
             {userRole === 'PROFESSIONAL' ? (
               <>
                 <Stack.Screen name="ProfessionalTabs" component={ProfessionalTabs} />
+                <Stack.Screen 
+                  name="DepositInformation" 
+                  component={DepositInformationScreen}
+                  options={{
+                    headerShown: true,
+                    title: 'Deposit Information',
+                    headerBackTitle: 'Back'
+                  }}
+                />
                 <Stack.Screen name="EditProfessional" component={EditProfessionalScreen} />
                 <Stack.Screen name="BusinessHours" component={BusinessHoursScreen} />
                 <Stack.Screen name="DepositSettings" component={DepositSettingsScreen} />
@@ -283,11 +325,7 @@ const Navigation = () => {
             ) : (
               <>
                 <Stack.Screen name="CustomerTabs" component={CustomerTabs} />
-                <Stack.Screen name="CustomerViewProfessional" component={CustomerViewProfessionalScreen} />
                 <Stack.Screen name="CustomerProfileScreen" component={CustomerProfileScreen} />
-                <Stack.Screen name="ServiceDetails" component={ServiceDetailsScreen} />
-                <Stack.Screen name="Booking" component={BookingScreen} />
-                <Stack.Screen name="BookingPayment" component={BookingPayment} />
                 <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
                 <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
                 <Stack.Screen name="HelpCentre" component={HelpCentreScreen} />
@@ -317,6 +355,15 @@ const ErrorBoundary = ({ children }) => {
 
   return children;
 };
+
+function resetToWelcome(navigation) {
+  navigation.dispatch(
+    CommonActions.reset({
+      index: 0,
+      routes: [{ name: 'Welcome' }],
+    })
+  );
+}
 
 export default function App() {
   console.log('Initializing App');

@@ -44,53 +44,75 @@ export class BookingService {
     try {
       console.log('Fetching working hours for professional:', professionalId);
       
-      // Fetch business hours directly from professionals table
-      const { data: professional, error } = await supabase
-        .from('professionals')
-        .select('business_hours')
-        .eq('id', professionalId)
+      // Fetch working hours as a single row with all days
+      const { data: workingHours, error } = await supabase
+        .from('professional_working_hours')  // Using the correct table name
+        .select('*')
+        .eq('professional_id', professionalId)
         .single();
 
       if (error) {
-        console.error('Error fetching professional business hours:', error);
-        throw new Error('Failed to fetch business hours');
+        console.error('Error fetching working hours:', error);
+        // Instead of throwing, return default hours
+        const defaultHours = this.getDefaultWorkingHours();
+        return defaultHours;
       }
 
-      if (!professional?.business_hours) {
-        console.log('No business hours found for professional');
-        return null;
+      // Map numbers to days
+      const dayMap: { [key: number]: string } = {
+        1: 'Monday',
+        2: 'Tuesday',
+        3: 'Wednesday',
+        4: 'Thursday',
+        5: 'Friday',
+        6: 'Saturday',
+        7: 'Sunday'
+      };
+
+      if (!workingHours) {
+        return this.getDefaultWorkingHours();
       }
 
-      console.log('Retrieved business hours:', professional.business_hours);
-
-      // Validate and transform the business hours
-      const businessHours = professional.business_hours as BusinessHours;
-      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-      
-      // Ensure all days are present with correct structure
+      // Transform working hours data into BusinessHours format
       const validatedHours: BusinessHours = {};
-      for (const day of days) {
-        if (businessHours[day] && 
-            typeof businessHours[day].isOpen === 'boolean' &&
-            typeof businessHours[day].openTime === 'string' &&
-            typeof businessHours[day].closeTime === 'string') {
-          validatedHours[day] = businessHours[day];
-        } else {
-          // Set default hours if not properly configured
-          validatedHours[day] = {
-            isOpen: false,
-            openTime: '09:00',
-            closeTime: '17:00'
-          };
-        }
+
+      for (let i = 1; i <= 7; i++) {
+        validatedHours[dayMap[i]] = {
+          isOpen: workingHours[`is_open_${i}`] ?? true,
+          openTime: workingHours[`open_time_${i}`] || '09:00',
+          closeTime: workingHours[`close_time_${i}`] || '17:00'
+        };
       }
 
-      console.log('Validated business hours:', validatedHours);
       return validatedHours;
     } catch (error) {
       console.error('Error in getWorkingHours:', error);
-      throw new Error('Failed to fetch working hours');
+      return this.getDefaultWorkingHours();
     }
+  }
+
+  private getDefaultWorkingHours(): BusinessHours {
+    const dayMap: { [key: number]: string } = {
+      1: 'Monday',
+      2: 'Tuesday',
+      3: 'Wednesday',
+      4: 'Thursday',
+      5: 'Friday',
+      6: 'Saturday',
+      7: 'Sunday'
+    };
+
+    const defaultHours: BusinessHours = {};
+    
+    for (let i = 1; i <= 7; i++) {
+      defaultHours[dayMap[i]] = {
+        isOpen: true,
+        openTime: '09:00',
+        closeTime: '17:00'
+      };
+    }
+    
+    return defaultHours;
   }
 
   // Get available time slots for a specific date

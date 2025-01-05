@@ -26,6 +26,9 @@ interface RouteParams {
   serviceDuration: string;
   professionalName: string;
   serviceId: string;
+  isRescheduling?: boolean;
+  originalBookingId?: string;
+  originalBookingStatus?: string;
 }
 
 type RootStackParamList = {
@@ -39,6 +42,9 @@ type RootStackParamList = {
     selectedTime: string;
     professionalId: string;
     serviceId: string;
+    isRescheduling?: boolean;
+    originalBookingId?: string;
+    originalBookingStatus?: string;
   };
   // ... other routes
 };
@@ -56,8 +62,41 @@ type BusinessHours = {
 export const BookingScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute();
-  const { professionalId, serviceName, servicePrice, serviceDuration, professionalName, serviceId } = route.params as RouteParams;
-  console.log('BookingScreen received professionalId:', professionalId);
+  const { 
+    professionalId, 
+    serviceName, 
+    servicePrice, 
+    serviceDuration, 
+    professionalName, 
+    serviceId, 
+    isRescheduling = false,
+    originalBookingId,
+    originalBookingStatus 
+  } = route.params as RouteParams;
+  
+  console.log('=== BookingScreen State ===');
+  console.log('Route Params:', route.params);
+  console.log('Is Rescheduling:', isRescheduling);
+  console.log('Original Booking ID:', originalBookingId);
+  console.log('Original Booking Status:', originalBookingStatus);
+  console.log('Professional ID:', professionalId);
+  console.log('Service Details:', {
+    name: serviceName,
+    price: servicePrice,
+    duration: serviceDuration,
+    id: serviceId
+  });
+  console.log('Professional Name:', professionalName);
+  console.log('========================');
+
+  useEffect(() => {
+    // Update screen title based on mode
+    navigation.setOptions({
+      title: isRescheduling ? 'Reschedule Booking' : 'New Booking',
+      headerTitle: isRescheduling ? 'Reschedule Booking' : 'New Booking'
+    });
+  }, [isRescheduling, navigation]);
+
   const { user } = useAuth();
   const bookingService = new BookingService();
   
@@ -83,6 +122,8 @@ export const BookingScreen = () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Get the professional's working hours directly using professional_id
       const hours = await bookingService.getWorkingHours(professionalId);
       
       if (!hours) {
@@ -110,33 +151,7 @@ export const BookingScreen = () => {
         return;
       }
 
-      // First get the professional profile ID
-      const { data: professional, error: profError } = await supabase
-        .from('professionals')
-        .select('id, user_id')
-        .eq('id', professionalId)
-        .single();
-
-      if (profError) {
-        console.error('Error getting professional:', profError);
-        throw profError;
-      }
-
-      // Get the professional profile ID
-      const { data: profProfile, error: profileError } = await supabase
-        .from('professional_profiles')
-        .select('id')
-        .eq('user_id', professional.user_id)
-        .single();
-
-      if (profileError) {
-        console.error('Error getting professional profile:', profileError);
-        throw profileError;
-      }
-
-      const professionalProfileId = profProfile.id;
-      console.log('Using professional profile ID for bookings:', professionalProfileId);
-
+      // Get the day name from selected date
       const dayOfWeek = selectedDate.getDay();
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const daySchedule = workingHours[days[dayOfWeek]];
@@ -147,23 +162,17 @@ export const BookingScreen = () => {
         return;
       }
 
-      // Get existing bookings for the selected date and professional
+      // Get existing bookings for the selected date
       const startOfDay = new Date(selectedDate);
       startOfDay.setHours(0, 0, 0, 0);
       
       const endOfDay = new Date(selectedDate);
       endOfDay.setHours(23, 59, 59, 999);
 
-      console.log('Fetching bookings for date range:', {
-        start: startOfDay.toISOString(),
-        end: endOfDay.toISOString(),
-        professionalProfileId
-      });
-
       const { data: existingBookings, error: bookingsError } = await supabase
         .from('bookings')
         .select('start_time, end_time')
-        .eq('professional_id', professionalProfileId)
+        .eq('professional_id', professionalId)
         .gte('start_time', startOfDay.toISOString())
         .lte('start_time', endOfDay.toISOString())
         .in('status', ['CONFIRMED', 'PENDING']);
@@ -172,8 +181,6 @@ export const BookingScreen = () => {
         console.error('Error fetching existing bookings:', bookingsError);
         throw bookingsError;
       }
-
-      console.log('Existing bookings:', existingBookings);
 
       // Convert booking times to Date objects
       const bookings = (existingBookings || []).map(booking => ({
@@ -283,28 +290,105 @@ export const BookingScreen = () => {
     setSelectedTime(time);
   };
 
-  const handleConfirmBooking = () => {
+  const handleConfirmBooking = async () => {
     if (!selectedTime) return;
     
-    console.log('Confirming booking:', {
+    console.log('Handling booking confirmation:', {
       date: selectedDate.toISOString(),
       time: selectedTime,
       serviceName,
       serviceDuration,
       professionalId,
-      serviceId
-    });
-    
-    navigation.navigate('BookingPayment', {
-      serviceName,
-      servicePrice,
-      serviceDuration,
-      professionalName,
-      selectedDate: selectedDate.toISOString(),
-      selectedTime,
-      professionalId,
       serviceId,
+      isRescheduling,
+      originalBookingId,
+      originalBookingStatus
     });
+
+    if (isRescheduling && originalBookingId) {
+      try {
+        setLoading(true);
+
+        // Calculate start and end times for the new booking
+        const [hours, minutes] = selectedTime.split(':').map(Number);
+        const startTime = new Date(selectedDate);
+        startTime.setHours(hours, minutes, 0, 0);
+        
+        const endTime = new Date(startTime);
+        endTime.setMinutes(endTime.getMinutes() + parseInt(serviceDuration));
+
+        // Get the professional profile ID
+        const { data: professional, error: profError } = await supabase
+          .from('professionals')
+          .select('id, user_id')
+          .eq('id', professionalId)
+          .single();
+
+        if (profError) throw profError;
+
+        const { data: profProfile, error: profileError } = await supabase
+          .from('professional_profiles')
+          .select('id')
+          .eq('user_id', professional.user_id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        // Get the customer profile ID
+        const { data: customerProfile, error: customerError } = await supabase
+          .from('customer_profiles')
+          .select('id')
+          .eq('user_id', user?.id)
+          .single();
+
+        if (customerError) {
+          console.error('Error getting customer profile:', customerError);
+          throw customerError;
+        }
+
+        if (!customerProfile) {
+          throw new Error('Customer profile not found');
+        }
+
+        const professionalProfileId = profProfile.id;
+
+        // Call the reschedule_booking function with correct parameters
+        const { data, error } = await supabase.rpc('reschedule_booking', {
+          p_old_booking_id: originalBookingId,
+          p_start_time: startTime.toISOString(),
+          p_end_time: endTime.toISOString(),
+          p_professional_id: professionalProfileId,
+          p_service_id: serviceId,
+          p_customer_id: customerProfile.id,
+          p_status: 'CONFIRMED'
+        });
+
+        if (error) throw error;
+
+        Alert.alert(
+          'Success',
+          'Your booking has been rescheduled successfully!',
+          [{ text: 'OK', onPress: () => navigation.navigate('CustomerBookings') }]
+        );
+      } catch (error) {
+        console.error('Error rescheduling booking:', error);
+        Alert.alert('Error', 'Failed to reschedule booking. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Handle normal booking flow
+      navigation.navigate('BookingPayment', {
+        serviceName,
+        servicePrice,
+        serviceDuration,
+        professionalName,
+        selectedDate: selectedDate.toISOString(),
+        selectedTime,
+        professionalId,
+        serviceId
+      });
+    }
   };
 
   const renderTimeSlots = () => {
@@ -427,7 +511,9 @@ export const BookingScreen = () => {
     
     return (
       <View style={styles.appointmentDetails}>
-        <Text style={styles.sectionTitle}>Appointment Details</Text>
+        <Text style={styles.sectionTitle}>
+          {isRescheduling ? 'Reschedule Details' : 'Appointment Details'}
+        </Text>
         <View style={styles.detailsCard}>
           <View style={styles.detailRow}>
             <Ionicons name="calendar-outline" size={20} color="#666" />
@@ -458,7 +544,9 @@ export const BookingScreen = () => {
           style={styles.confirmButton}
           onPress={handleConfirmBooking}
         >
-          <Text style={styles.confirmButtonText}>Confirm Booking</Text>
+          <Text style={styles.confirmButtonText}>
+            {isRescheduling ? 'Confirm Reschedule' : 'Confirm Booking'}
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -500,7 +588,9 @@ export const BookingScreen = () => {
         </View>
 
         <View style={styles.calendarContainer}>
-          <Text style={styles.sectionTitle}>Select Date</Text>
+          <Text style={styles.sectionTitle}>
+            {isRescheduling ? 'Select New Date' : 'Select Date'}
+          </Text>
           <Calendar
             onDayPress={(day) => setSelectedDate(new Date(day.timestamp))}
             markedDates={{
@@ -523,7 +613,9 @@ export const BookingScreen = () => {
         </View>
 
         <View style={styles.slotsContainer}>
-          <Text style={styles.sectionTitle}>Available Times</Text>
+          <Text style={styles.sectionTitle}>
+            {isRescheduling ? 'Select New Time' : 'Available Times'}
+          </Text>
           {renderTimeSlots()}
         </View>
         {renderAppointmentDetails()}
@@ -769,5 +861,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#4CAF50',
     marginTop: 4,
+  },
+  reschedulingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF3E0',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    marginBottom: 12,
+    gap: 8,
+  },
+  reschedulingText: {
+    color: '#FF5722',
+    fontSize: 14,
+    fontWeight: '500',
   },
 }); 

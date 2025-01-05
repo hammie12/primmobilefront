@@ -189,17 +189,37 @@ export const HomeScreen = () => {
     });
   };
 
-  const renderMetricCard = (title: string, value: string, icon: keyof typeof MaterialCommunityIcons.glyphMap) => (
-    <LinearGradient
-      colors={['#FFFFFF', '#FFF8F6']}
-      style={styles.metricCard}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const renderMetricCard = (
+    title: string, 
+    value: string | number, 
+    icon: keyof typeof MaterialCommunityIcons.glyphMap,
+    onPress?: () => void
+  ) => (
+    <TouchableOpacity 
+      style={styles.metricCardWrapper}
+      onPress={onPress}
+      activeOpacity={0.7}
     >
-      <MaterialCommunityIcons name={icon} size={28} color="#FF5722" />
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricTitle}>{title}</Text>
-    </LinearGradient>
+      <LinearGradient
+        colors={['#FFFFFF', '#FFF8F6']}
+        style={styles.metricCard}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <MaterialCommunityIcons name={icon} size={28} color="#FF5722" />
+        <Text style={styles.metricValue}>{value}</Text>
+        <Text style={styles.metricTitle}>{title}</Text>
+      </LinearGradient>
+    </TouchableOpacity>
   );
 
   const renderActionCard = (
@@ -227,9 +247,24 @@ export const HomeScreen = () => {
         <View style={styles.container}>
           {/* Metrics Section */}
           <View style={styles.metricsContainer}>
-            {renderMetricCard('Bookings Today', metrics.bookingsToday.toString(), 'calendar-today')}
-            {renderMetricCard('Revenue Made Today', `£${metrics.revenueToday.toFixed(2)}`, 'cash')}
-            {renderMetricCard('Total Clients', metrics.totalClients.toString(), 'account-plus')}
+            {renderMetricCard(
+              'Bookings Today', 
+              metrics.bookingsToday.toString(), 
+              'calendar-today',
+              () => navigation.navigate('BusinessBookings')
+            )}
+            {renderMetricCard(
+              'Revenue Made Today', 
+              `£${metrics.revenueToday.toFixed(2)}`, 
+              'cash',
+              () => navigation.navigate('BusinessAnalytics')
+            )}
+            {renderMetricCard(
+              'Total Clients', 
+              metrics.totalClients.toString(), 
+              'account-plus',
+              () => navigation.navigate('BusinessAnalytics')
+            )}
           </View>
 
           {/* Quick Actions */}
@@ -256,7 +291,10 @@ export const HomeScreen = () => {
                     end={{ x: 1, y: 1 }}
                   >
                     <View style={styles.appointmentHeader}>
-                      <Text style={styles.appointmentTime}>{formatTime(booking.start_time)}</Text>
+                      <View>
+                        <Text style={styles.appointmentDate}>{formatDate(booking.start_time)}</Text>
+                        <Text style={styles.appointmentTime}>{formatTime(booking.start_time)}</Text>
+                      </View>
                       <View style={styles.statusBadge}>
                         <Text style={styles.appointmentStatus}>Confirmed</Text>
                       </View>
@@ -449,5 +487,21 @@ const styles = StyleSheet.create({
     color: '#666666',
     textAlign: 'center',
     padding: 16,
+  },
+  metricCardWrapper: {
+    flex: 1,
+    marginHorizontal: 4,
+  },
+  appointmentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  appointmentDate: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+    marginBottom: 2,
   },
 });
