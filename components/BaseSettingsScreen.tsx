@@ -1,99 +1,89 @@
 import React from 'react';
-import { View, StyleSheet, SafeAreaView, ScrollView, StatusBar, Platform, Text, TouchableOpacity } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
+  StatusBar,
+} from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import Constants from 'expo-constants';
-import { Ionicons } from '@expo/vector-icons';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { Typography } from './Typography';
 
 interface BaseSettingsScreenProps {
-  children: React.ReactNode;
   title: string;
+  children: React.ReactNode;
+  showSaveButton?: boolean;
   onSave?: () => void;
-  scrollable?: boolean;
-  paddingHorizontal?: number;
 }
 
 export const BaseSettingsScreen: React.FC<BaseSettingsScreenProps> = ({
-  children,
   title,
+  children,
+  showSaveButton = false,
   onSave,
-  scrollable = true,
-  paddingHorizontal = 16,
 }) => {
-  const navigation = useNavigation<StackNavigationProp<any>>();
-  const Container = scrollable ? ScrollView : View;
+  const navigation = useNavigation();
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor="#FFFFFF"
-        translucent={Platform.OS === 'android'}
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color="#FF5722" />
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={24} color="#333333" />
         </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
-        {onSave && (
-          <TouchableOpacity onPress={onSave} style={styles.saveButton}>
-            <Text style={styles.saveText}>Save</Text>
+        <Typography variant="h1" style={styles.title}>
+          {title}
+        </Typography>
+        {showSaveButton && (
+          <TouchableOpacity style={styles.saveButton} onPress={onSave}>
+            <Typography variant="body1" style={styles.saveButtonText}>
+              Save
+            </Typography>
           </TouchableOpacity>
         )}
       </View>
-      <Container
-        style={[
-          styles.container,
-          { paddingHorizontal },
-          !scrollable && { flex: 1 },
-        ]}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-      >
-        {children}
-      </Container>
+      <View style={styles.content}>{children}</View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight : 0,
+    backgroundColor: '#F5F5F5',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    height: 56,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E0E0E0',
-    backgroundColor: '#FFFFFF',
   },
   backButton: {
     padding: 8,
-    marginLeft: -8,
+    marginRight: 8,
   },
   title: {
-    fontSize: 18,
+    flex: 1,
+    fontSize: 20,
     fontWeight: '600',
     color: '#333333',
-    flex: 1,
-    textAlign: 'center',
-    marginHorizontal: 16,
   },
   saveButton: {
     padding: 8,
   },
-  saveText: {
+  saveButtonText: {
     color: '#FF5722',
-    fontSize: 16,
     fontWeight: '600',
   },
-  container: {
+  content: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    padding: 16,
   },
 });

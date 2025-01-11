@@ -43,11 +43,18 @@ type Booking = {
     last_name: string;
     profile_image: string | null;
     business_name: string;
+    user_id: string;
     user: {
       professionals: {
+        id: string;
+        profile_image: string | null;
+        business_name: string;
+        about: string | null;
+        rating: number | null;
+        category: string | null;
         address: string | null;
       }[];
-    } | null;
+    };
   };
   professional_profile: {
     id: string;
@@ -135,7 +142,8 @@ const ActionCard = ({
 type ServiceDetails = {
   id: string;
   name: string;
-  price: number;
+  deposit_price: number;
+  full_price: number;
   duration: number;
   professional_id: string;
   category: Database['public']['Enums']['service_category'];
@@ -257,76 +265,26 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           isRescheduling: true,
           selectedBookingId: selectedBooking.id,
           bookingStatus: selectedBooking.status,
-          serviceDetails: {
-            name: selectedBooking.service.name,
-            price: selectedBooking.service.price,
-            duration: selectedBooking.service.duration_total_minutes
-          }
+          serviceDetails: selectedBooking.service
         });
 
-        // First get the professional profile to get the user_id
-        const { data: profProfile, error: profileError } = await supabase
-          .from('professional_profiles')
-          .select('user_id')
-          .eq('id', selectedBooking.professional_profiles.id)
-          .single();
-
-        if (profileError) {
-          console.error('Error fetching professional profile:', profileError);
-          throw profileError;
+        // Get the professional ID from the correct path
+        const professional = selectedBooking.professional_profiles?.user?.professionals?.[0];
+        
+        if (!professional?.id) {
+          throw new Error('Professional details not found');
         }
-
-        if (!profProfile?.user_id) {
-          throw new Error('No user_id found for professional profile');
-        }
-
-        // Then get the professional record using the user_id
-        const { data: professional, error: profError } = await supabase
-          .from('professionals')
-          .select('*, business_hours')
-          .eq('user_id', profProfile.user_id)
-          .single();
-
-        if (profError) {
-          console.error('Error fetching professional:', profError);
-          throw profError;
-        }
-
-        // Default business hours structure
-        const defaultHours = {
-          Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Saturday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
-          Sunday: { isOpen: false, openTime: '09:00', closeTime: '17:00' }
-        };
-
-        // Use business hours from profile or default if not found
-        const businessHours = professional?.business_hours || defaultHours;
-
-        console.log('Navigating to BookingScreen with params:', {
-          professionalId: professional.id,
-          serviceName: selectedBooking.service.name,
-          servicePrice: selectedBooking.service.price,
-          serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
-          professionalName: selectedBooking.professional_profiles.business_name,
-          serviceId: selectedBooking.service.id,
-          isRescheduling: true,
-          originalBookingId: selectedBooking.id,
-          originalBookingStatus: selectedBooking.status
-        });
 
         // Navigate to BookingScreen with all required data
         navigation.navigate('Booking', {
           professionalId: professional.id,
           serviceName: selectedBooking.service.name,
           servicePrice: selectedBooking.service.price,
+          depositPrice: selectedBooking.service.deposit_price || 0,
+          fullPrice: selectedBooking.service.full_price || selectedBooking.service.price,
           serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
           professionalName: selectedBooking.professional_profiles.business_name,
           serviceId: selectedBooking.service.id,
-          workingHours: businessHours,
           isRescheduling: true,
           originalBookingId: selectedBooking.id,
           originalBookingStatus: selectedBooking.status
@@ -335,36 +293,12 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
         setIsRescheduleModalVisible(false);
       } catch (error) {
         console.error('Error in reschedule process:', error);
-        
-        // Use default hours if there's an error
-        const defaultHours = {
-          Monday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Tuesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Wednesday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Thursday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Friday: { isOpen: true, openTime: '09:00', closeTime: '17:00' },
-          Saturday: { isOpen: false, openTime: '09:00', closeTime: '17:00' },
-          Sunday: { isOpen: false, openTime: '09:00', closeTime: '17:00' }
-        };
-
-        // In error case, use the service's professional_id
-        navigation.navigate('Booking', {
-          professionalId: selectedBooking.service.professional_id,
-          serviceName: selectedBooking.service.name,
-          servicePrice: selectedBooking.service.price,
-          serviceDuration: selectedBooking.service.duration_total_minutes.toString(),
-          professionalName: selectedBooking.professional_profiles.business_name,
-          serviceId: selectedBooking.service.id,
-          workingHours: defaultHours
-        });
-
-        setIsRescheduleModalVisible(false);
-        
         showMessage({
-          message: "Using default business hours",
-          type: "info",
-          description: "Proceeding with standard business hours."
+          message: "Failed to start reschedule process",
+          type: "danger",
+          description: "Could not retrieve professional details"
         });
+        setIsRescheduleModalVisible(false);
       }
     }
   };
@@ -404,29 +338,38 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
   };
 
   useEffect(() => {
-    // Set initial tab based on route params
     if (route.params?.initialTab) {
       setActiveTab(route.params.initialTab);
     }
-  }, [route.params?.initialTab]);
+    
+    // If refresh param is true, fetch bookings immediately
+    if (route.params?.refresh) {
+      fetchBookings();
+    }
+  }, [route.params]);
 
   useEffect(() => {
-    // Scroll to selected booking after bookings are loaded
-    if (!isLoading && route.params?.selectedBookingId && bookings.length > 0) {
-      const selectedBooking = bookings.find(b => b.id === route.params.selectedBookingId);
-      if (selectedBooking) {
-        const selectedRef = bookingRefs.current[selectedBooking.id];
-        if (selectedRef) {
-          const node = findNodeHandle(selectedRef);
-          if (node && scrollViewRef.current) {
-            scrollViewRef.current.scrollTo({
-              y: node,
-              animated: true
-            });
+    const scrollToSelectedBooking = () => {
+      if (!isLoading && route.params?.selectedBookingId && bookings.length > 0) {
+        const selectedBooking = bookings.find(b => b.id === route.params.selectedBookingId);
+        if (selectedBooking) {
+          const selectedRef = bookingRefs.current[selectedBooking.id];
+          if (selectedRef && scrollViewRef.current) {
+            setTimeout(() => {
+              const node = findNodeHandle(selectedRef);
+              if (node) {
+                scrollViewRef.current?.scrollTo({
+                  y: node,
+                  animated: true
+                });
+              }
+            }, 500); // Add a small delay to ensure the list is rendered
           }
         }
       }
-    }
+    };
+
+    scrollToSelectedBooking();
   }, [isLoading, bookings, route.params?.selectedBookingId]);
 
   const fetchBookings = async () => {
@@ -487,7 +430,8 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
           service:service_id (
             id,
             name,
-            price,
+            deposit_price,
+            full_price,
             duration_total_minutes,
             duration_hours,
             duration_minutes,
@@ -714,6 +658,16 @@ export const CustomerBookingsScreen = ({ route }: { route: any }) => {
                 />
                 <Typography variant="caption" style={styles.serviceType}>
                   {booking.service?.name || 'Service Unavailable'} • {booking.service?.duration_hours}h {booking.service?.duration_minutes}m
+                </Typography>
+              </View>
+              <View style={styles.priceContainer}>
+                <MaterialCommunityIcons 
+                  name="cash" 
+                  size={16} 
+                  color="#FF5722" 
+                />
+                <Typography variant="caption" style={styles.priceText}>
+                  £{booking.service?.full_price?.toFixed(2) || '0.00'} (£{booking.service?.deposit_price?.toFixed(2) || '0.00'} deposit)
                 </Typography>
               </View>
               <View style={styles.timeContainer}>
@@ -1234,5 +1188,16 @@ const styles = StyleSheet.create({
   },
   cancelledStatusText: {
     color: '#C62828',
+  },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  priceText: {
+    color: '#666',
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

@@ -18,7 +18,7 @@ type MetricsData = {
 };
 
 type MonthlyRevenue = {
-  month: string;
+  label: string;
   revenue: number;
 };
 
@@ -166,8 +166,12 @@ export const BusinessAnalyticsScreen = () => {
             id,
             service_id,
             customer_id,
+            status,
             services (
-              price
+              id,
+              name,
+              full_price,
+              deposit_price
             )
           `)
           .eq('professional_id', professionalId)
@@ -194,7 +198,7 @@ export const BusinessAnalyticsScreen = () => {
             service_id,
             customer_id,
             services (
-              price
+              full_price
             )
           `)
           .eq('professional_id', professionalId)
@@ -214,8 +218,13 @@ export const BusinessAnalyticsScreen = () => {
         if (previousReviewsError) throw previousReviewsError;
 
         // Calculate current period metrics
-        const currentRevenue = currentBookings?.reduce((sum, booking) => 
-          sum + ((booking.services as any)?.price || 0), 0) || 0;
+        const currentRevenue = currentBookings?.reduce((sum, booking) => {
+          const service = booking.services as { full_price: number };
+          if (!service) return sum;
+          
+          // Use full_price for all bookings
+          return sum + (service.full_price || 0);
+        }, 0) || 0;
         const currentBookingsCount = currentBookings?.length || 0;
         const currentUniqueClients = new Set(currentBookings?.map(b => b.customer_id)).size;
         const currentAvgRating = currentReviews?.length
@@ -224,7 +233,7 @@ export const BusinessAnalyticsScreen = () => {
 
         // Calculate previous period metrics
         const previousRevenue = previousBookings?.reduce((sum, booking) => 
-          sum + ((booking.services as any)?.price || 0), 0) || 0;
+          sum + ((booking.services as any)?.full_price || 0), 0) || 0;
         const previousBookingsCount = previousBookings?.length || 0;
         const previousUniqueClients = new Set(previousBookings?.map(b => b.customer_id)).size;
         const previousAvgRating = previousReviews?.length
@@ -318,8 +327,12 @@ export const BusinessAnalyticsScreen = () => {
         .from('bookings')
         .select(`
           start_time,
+          status,
           services (
-            price
+            id,
+            name,
+            full_price,
+            deposit_price
           )
         `)
         .eq('professional_id', professionalId)
@@ -335,7 +348,8 @@ export const BusinessAnalyticsScreen = () => {
       bookings?.forEach(booking => {
         let key = '';
         const date = new Date(booking.start_time);
-        const revenue = (booking.services as any)?.price || 0;
+        const service = booking.services as { full_price: number };
+        const revenue = service?.full_price || 0;
 
         switch (selectedPeriod) {
           case 'year':
@@ -471,10 +485,12 @@ export const BusinessAnalyticsScreen = () => {
       const { data, error } = await supabase
         .from('bookings')
         .select(`
+          status,
           services (
             id,
             name,
-            price
+            full_price,
+            deposit_price
           )
         `)
         .eq('professional_id', professionalId)
@@ -488,11 +504,15 @@ export const BusinessAnalyticsScreen = () => {
       let totalRevenue = 0;
 
       data?.forEach(booking => {
-        const service = booking.services as { name: string; price: number };
+        const service = booking.services as { 
+          name: string; 
+          full_price: number;
+        };
         if (service) {
+          const price = service.full_price;
           const currentAmount = serviceMap.get(service.name) || 0;
-          serviceMap.set(service.name, currentAmount + service.price);
-          totalRevenue += service.price;
+          serviceMap.set(service.name, currentAmount + price);
+          totalRevenue += price;
         }
       });
 

@@ -108,7 +108,7 @@ export const TermsOfServiceScreen = () => {
             11. Contact Information
           </Typography>
           <Typography variant="body1" style={styles.text}>
-            For questions about these Terms of Service, please contact our support team through the app or email support@prim.com.
+            For questions about these Terms of Service, please contact our support team through the app or email support@priim.com.
           </Typography>
         </SettingsSection>
       </ScrollView>

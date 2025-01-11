@@ -175,7 +175,7 @@ const SignUpScreen = () => {
         >
           <View style={styles.content}>
             <View style={styles.logoContainer}>
-              <Text style={styles.logo}>Prim</Text>
+              <Text style={styles.logo}>Priim</Text>
               <Text style={styles.tagline}>Create your account</Text>
             </View>
 
@@ -373,19 +373,23 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginTop: 60,
-    marginBottom: 40,
+    marginTop: 40,
+    marginBottom: 32,
   },
   logo: {
     fontSize: 48,
-    fontWeight: 'bold',
+    fontWeight: '800',
     color: '#FF5722',
     marginBottom: 16,
+    letterSpacing: -1,
   },
   tagline: {
-    fontSize: 18,
-    color: '#666666',
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#1A1A1A',
     textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.5,
   },
   form: {
     width: '100%',
@@ -393,21 +397,31 @@ const styles = StyleSheet.create({
   },
   roleSelector: {
     flexDirection: 'row',
-    marginBottom: 24,
+    marginBottom: 32,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 4,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   roleButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 12,
   },
   roleButtonActive: {
     backgroundColor: '#FF5722',
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   roleButtonText: {
     fontSize: 16,
@@ -420,11 +434,16 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
+    borderRadius: 16,
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   button: {
     width: '100%',
@@ -435,11 +454,17 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: '#FF5722',
+    shadowColor: '#FF5722',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   primaryButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
+    letterSpacing: -0.5,
   },
   outlineButton: {
     backgroundColor: 'transparent',
@@ -467,12 +492,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   categorySelector: {
-    marginBottom: 16,
+    marginBottom: 24,
   },
   categoryLabel: {
-    fontSize: 16,
-    color: '#666666',
-    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 12,
+    marginLeft: 4,
   },
   categoryButtons: {
     flexDirection: 'row',
@@ -482,11 +509,16 @@ const styles = StyleSheet.create({
   categoryButton: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    padding: 12,
-    borderRadius: 12,
+    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E0E0E0',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   categoryButtonActive: {
     backgroundColor: '#FF5722',

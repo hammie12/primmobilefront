@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { showMessage } from '../../utils/showMessage';
+import { Database } from '../lib/supabase/schema';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -100,6 +101,10 @@ export const BookingScreen = ({ route }: BookingScreenProps) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { user } = useAuth();
+  const [workingHours, setWorkingHours] = useState<BusinessHours | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { 
     serviceDetails, 
@@ -291,47 +296,105 @@ export const BookingScreen = ({ route }: BookingScreenProps) => {
     return slots;
   };
 
+  const checkBookingOverlap = async (startTime: Date, endTime: Date) => {
+    try {
+      const { data: existingBookings, error: bookingsError } = await supabase
+        .from('bookings')
+        .select('start_time, end_time')
+        .eq('professional_id', professionalDetails.id)
+        .neq('status', 'CANCELLED')
+        .or(`start_time.lte.${endTime.toISOString()},end_time.gt.${startTime.toISOString()}`);
+
+      if (bookingsError) {
+        console.error('Error checking booking overlap:', bookingsError);
+        throw bookingsError;
+      }
+
+      const hasOverlap = existingBookings?.some(booking => {
+        const bookingStart = new Date(booking.start_time);
+        const bookingEnd = new Date(booking.end_time);
+        
+        const overlap = (
+          (startTime <= bookingEnd && startTime >= bookingStart) ||
+          (endTime > bookingStart && endTime <= bookingEnd) ||
+          (startTime <= bookingStart && endTime >= bookingEnd)
+        );
+
+        if (overlap) {
+          console.log('Booking overlap detected:', {
+            proposed: { start: startTime, end: endTime },
+            existing: { start: bookingStart, end: bookingEnd }
+          });
+        }
+
+        return overlap;
+      });
+
+      return hasOverlap;
+    } catch (error) {
+      console.error('Error in checkBookingOverlap:', error);
+      throw error;
+    }
+  };
+
   const handleSlotPress = async (date: Date, time: string, isAvailable: boolean) => {
-    if (!isTimeSlotAvailable(date, time)) {
+    if (!isAvailable) {
       Alert.alert('Not Available', 'This time slot is already booked.');
       return;
     }
 
-    const [hours, minutes] = time.split(':').map(Number);
-    const selectedDateTime = new Date(date);
-    selectedDateTime.setHours(hours, minutes, 0, 0);
+    try {
+      setLoading(true);
+      setError(null);
 
-    if (isRescheduling && originalBookingId) {
-      try {
-        const { error } = await supabase
+      const [hours, minutes] = time.split(':').map(Number);
+      const startDateTime = new Date(date);
+      startDateTime.setHours(hours, minutes, 0, 0);
+      
+      const endDateTime = new Date(startDateTime);
+      endDateTime.setMinutes(endDateTime.getMinutes() + parseInt(serviceDetails.duration));
+
+      // Check for overlapping bookings
+      const hasOverlap = await checkBookingOverlap(startDateTime, endDateTime);
+
+      if (hasOverlap) {
+        Alert.alert('Not Available', 'This time slot conflicts with an existing booking.');
+        return;
+      }
+
+      // If we're rescheduling, handle that case
+      if (route.params.isRescheduling && route.params.bookingDetails) {
+        const { error: updateError } = await supabase
           .from('bookings')
-          .update({ 
-            start_time: selectedDateTime.toISOString(),
-            end_time: new Date(selectedDateTime.getTime() + 30 * 60000).toISOString(),
-            service_id: serviceId
+          .update({
+            start_time: startDateTime.toISOString(),
+            end_time: endDateTime.toISOString()
           })
-          .eq('id', originalBookingId);
+          .eq('id', route.params.bookingDetails.id);
 
-        if (error) throw error;
+        if (updateError) throw updateError;
 
         showMessage({
-          message: "Booking rescheduled successfully",
-          type: "success"
+          message: 'Booking rescheduled successfully',
+          type: 'success'
         });
 
         navigation.goBack();
-      } catch (error) {
-        console.error('Error rescheduling booking:', error);
-        Alert.alert('Error', 'Failed to reschedule booking. Please try again.');
+      } else {
+        // For new bookings, navigate to confirmation
+        navigation.navigate('BookingConfirmation', {
+          selectedTime: startDateTime.toISOString(),
+          duration: serviceDetails.duration,
+          professionalId: professionalDetails.id,
+          serviceId: serviceDetails.id
+        });
       }
-    } else {
-      // Handle normal booking flow
-      navigation.navigate('BookingConfirmation', {
-        selectedTime: selectedDateTime.toISOString(),
-        duration: 30,
-        professionalId,
-        serviceId
-      });
+    } catch (error) {
+      console.error('Error handling slot selection:', error);
+      setError('Failed to process booking request');
+      Alert.alert('Error', 'Failed to process booking request. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 

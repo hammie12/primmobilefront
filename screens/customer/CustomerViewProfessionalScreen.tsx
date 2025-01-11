@@ -38,6 +38,7 @@ type Service = {
   duration: number;
   price: number;
   deposit_price: number;
+  full_price: number;
   category: ServiceCategory;
   images?: string[];
   created_at?: string;
@@ -174,8 +175,8 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
           name,
           description,
           duration_total_minutes,
-          price,
           deposit_price,
+          full_price,
           category,
           images
         `)
@@ -193,8 +194,9 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
         name: service.name,
         description: service.description,
         duration: service.duration_total_minutes,
-        price: service.price,
-        deposit_price: service.deposit_price || service.price,
+        price: service.deposit_price,
+        deposit_price: service.deposit_price,
+        full_price: service.full_price,
         category: service.category,
         images: service.images || []
       })) || [];
@@ -283,7 +285,7 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
           <View style={styles.priceContainer}>
             <View style={styles.serviceDetail}>
               <MaterialCommunityIcons name="cash" size={16} color="#666666" />
-              <Text style={styles.serviceDetailText}>Full Price: £{service.deposit_price}</Text>
+              <Text style={styles.serviceDetailText}>Full Price: £{service.full_price}</Text>
             </View>
             <View style={styles.paymentNoteContainer}>
               <Text style={styles.pricingNote}>Pay to service provider</Text>
@@ -292,10 +294,10 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
           <View style={styles.priceContainer}>
             <View style={styles.serviceDetail}>
               <MaterialCommunityIcons name="credit-card-outline" size={16} color="#666666" />
-              <Text style={styles.serviceDetailText}>Deposit: £{service.price}</Text>
+              <Text style={styles.serviceDetailText}>Deposit: £{service.deposit_price}</Text>
             </View>
             <View style={styles.paymentNoteContainer}>
-              <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Prim</Text></Text>
+              <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Priim</Text></Text>
             </View>
           </View>
         </View>
@@ -306,7 +308,9 @@ export const CustomerViewProfessionalScreen = ({ route }) => {
             navigation.navigate('Booking', {
               professionalId,
               serviceName: service.name,
-              servicePrice: service.price,
+              servicePrice: service.deposit_price,
+              depositPrice: service.deposit_price,
+              fullPrice: service.full_price,
               serviceDuration: service.duration.toString(),
               professionalName: profileData.businessName,
               serviceId: service.id,

@@ -27,38 +27,10 @@ import { generateRandomColor } from '../utils/colors';
 import NetInfo from '@react-native-community/netinfo';
 import type { Database } from '../lib/supabase/schema';
 
-// Add status colors and icons
-const STATUS_STYLES: Record<Database["public"]["Enums"]["booking_status"], {
-  color: string;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-}> = {
-  PENDING: {
-    color: '#FFA000',
-    icon: 'clock-outline',
-    label: 'Pending'
-  },
-  CONFIRMED: {
-    color: '#2196F3',
-    icon: 'check-circle-outline',
-    label: 'Confirmed'
-  },
-  COMPLETED: {
-    color: '#4CAF50',
-    icon: 'check-circle',
-    label: 'Completed'
-  },
-  CANCELLED: {
-    color: '#F44336',
-    icon: 'close-circle',
-    label: 'Cancelled'
-  }
-};
-
 // Queue for offline operations
 type QueuedOperation = {
   id: string;
-  type: 'complete' | 'cancel';
+  type: 'cancel';
   data: any;
   timestamp: number;
 };
@@ -70,7 +42,6 @@ type Appointment = {
   end_time: string;
   customer_name: string;
   service_name: string;
-  status: Database["public"]["Enums"]["booking_status"];
   color?: string;
   date: string;
   price: number;
@@ -78,6 +49,8 @@ type Appointment = {
   customer_phone: string;
   notes?: string;
   business_id: string;
+  deposit_price: number;
+  full_price: number;
 };
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -101,70 +74,9 @@ type Booking = Database['public']['Tables']['bookings']['Row'] & {
   };
   service_id: {
     name: string;
-    price: number;
+    deposit_price: number;
+    full_price: number;
   };
-};
-
-const updateBookingStatus = async (bookingId: string, status: Database["public"]["Enums"]["booking_status"], notes?: string) => {
-  try {
-    console.log('=== Booking Status Update ===');
-    console.log(`Booking ID: ${bookingId}`);
-    console.log(`Target Status: ${status}`);
-    console.log(`Notes provided: ${notes ? 'Yes' : 'No'}`);
-    
-    if (status === 'COMPLETED') {
-      // Use the existing complete_booking function
-      const { data, error } = await supabase
-        .rpc('complete_booking', { 
-          p_booking_id: bookingId,
-          p_completion_notes: notes || null
-        });
-      
-      if (error) {
-        console.error('Booking completion failed:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        throw error;
-      }
-      
-      console.log('Booking completed successfully');
-      return true;
-    } else {
-      // For other status updates, use normal update
-      const { error } = await supabase
-        .from('bookings')
-        .update({ 
-          status: status,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', bookingId);
-      
-      if (error) {
-        console.error('Status update failed:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        });
-        throw error;
-      }
-      
-      console.log(`Status successfully updated to ${status}`);
-      return true;
-    }
-  } catch (error) {
-    console.error('=== Booking Update Failed ===');
-    console.error('Error details:', {
-      error,
-      bookingId,
-      status,
-      notes: notes ? 'Provided' : 'Not provided'
-    });
-    return false;
-  }
 };
 
 // Add this helper function at the top of the file, outside the component
@@ -225,8 +137,6 @@ const DayColumn = ({ date, appointments }: { date: Date, appointments: Appointme
         const top = (startHour * 60 + startMinute);
         const height = ((endHour - startHour) * 60 + (endMinute - startMinute));
 
-        const statusStyle = STATUS_STYLES[appointment.status];
-
         return (
           <TouchableOpacity
             key={appointment.id}
@@ -249,7 +159,6 @@ const DayColumn = ({ date, appointments }: { date: Date, appointments: Appointme
                 >
                   {appointment.start_time} - {appointment.end_time}
                 </Typography>
-                <View style={[styles.statusDot, { backgroundColor: statusStyle.color }]} />
               </View>
               <Typography 
                 variant="body1" 
@@ -259,7 +168,7 @@ const DayColumn = ({ date, appointments }: { date: Date, appointments: Appointme
                 {appointment.customer_name}
               </Typography>
               <Typography 
-                variant="body2" 
+                variant="body1" 
                 style={styles.appointmentService}
                 numberOfLines={1}
               >
@@ -338,8 +247,6 @@ export const BusinessBookingsScreen = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
-  const [isCompletingBooking, setIsCompletingBooking] = useState(false);
-  const [completionNotes, setCompletionNotes] = useState('');
   const [operationQueue, setOperationQueue] = useState<QueuedOperation[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [statusAnimation] = useState(new Animated.Value(0));
@@ -423,39 +330,33 @@ export const BusinessBookingsScreen = () => {
       }
 
       // Attempt to update status
-      const success = await updateBookingStatus(
+      await updateBookingStatus(
         appointment.id, 
         'COMPLETED',
         completionNotes || undefined
       );
       
-      if (success) {
-        // Animate status change
-        Animated.sequence([
-          Animated.timing(statusAnimation, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true
-          }),
-          Animated.timing(statusAnimation, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true
-          })
-        ]).start();
-
-        // Update local state
-        updateLocalAppointmentStatus(appointment.id, 'COMPLETED');
-        
-        // Show success message
-        Alert.alert('Success', 'Appointment marked as completed successfully');
-        
-        // Close modal and clear notes
-        setSelectedAppointment(null);
-        setCompletionNotes('');
-      } else {
-        throw new Error('Failed to update booking status');
-      }
+      // Animate status change
+      Animated.sequence([
+        Animated.timing(statusAnimation, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true
+        }),
+        Animated.timing(statusAnimation, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true
+        })
+      ]).start();
+      
+      // Show success message
+      Alert.alert('Success', 'Appointment marked as completed successfully');
+      
+      // Close modal and clear notes
+      setSelectedAppointment(null);
+      setCompletionNotes('');
+      
     } catch (error) {
       console.error('Error completing appointment:', error);
       setErrorMessage('Failed to complete appointment. Please try again.');
@@ -503,7 +404,7 @@ export const BusinessBookingsScreen = () => {
           return;
         }
 
-        // Fetch bookings for this professional
+        // Update the query to select both prices
         const { data: bookings, error: bookingsError } = await supabase
           .from('bookings')
           .select(`
@@ -522,24 +423,25 @@ export const BusinessBookingsScreen = () => {
             ),
             service_id (
               name,
-              price
+              deposit_price,
+              full_price
             )
           `)
           .eq('professional_id', professionalData.id);
 
         if (bookingsError) throw bookingsError;
 
-        // Transform bookings to match Appointment type with null checks
+        // Update the transformation to include both prices
         const formattedAppointments: Appointment[] = bookings
-          .filter(booking => booking.start_time && booking.end_time) // Filter out invalid bookings
+          .filter(booking => booking.start_time && booking.end_time)
           .map(booking => {
-            // Default values for null cases
             const customerName = booking.customer_id 
               ? `${booking.customer_id.first_name || ''} ${booking.customer_id.last_name || ''}`.trim() 
               : 'Unknown Customer';
             
             const serviceName = booking.service_id?.name || 'Unknown Service';
-            const servicePrice = booking.service_id?.price || 0;
+            const depositPrice = booking.service_id?.deposit_price || 0;
+            const fullPrice = booking.service_id?.full_price || 0;
             
             const customerEmail = booking.customer_id?.user_id?.email || '';
             const customerPhone = booking.customer_id?.phone_number || '';
@@ -558,10 +460,11 @@ export const BusinessBookingsScreen = () => {
               }),
               customer_name: customerName,
               service_name: serviceName,
-              status: booking.status || 'PENDING', // Default status
+              status: booking.status || 'PENDING',
               color: generateRandomColor(),
               date: new Date(booking.start_time).toISOString().split('T')[0],
-              price: servicePrice,
+              deposit_price: depositPrice,
+              full_price: fullPrice,
               customer_email: customerEmail,
               customer_phone: customerPhone,
               notes: booking.notes || '',
@@ -572,7 +475,6 @@ export const BusinessBookingsScreen = () => {
         setAppointments(formattedAppointments);
       } catch (error) {
         console.error('Error fetching appointments:', error);
-        // TODO: Show error toast or message to user
       } finally {
         setIsLoading(false);
       }
@@ -777,7 +679,7 @@ export const BusinessBookingsScreen = () => {
                   }}
                 >
                   <Typography
-                    variant="body2"
+                    variant="body1"
                     style={[
                       styles.dayNumber,
                       !isCurrentMonth && styles.otherMonthDayText,
@@ -789,11 +691,12 @@ export const BusinessBookingsScreen = () => {
                   </Typography>
                   {dayAppointments.length > 0 && (
                     <View style={styles.appointmentDots}>
-                      {dayAppointments.slice(0, 3).map((_, i) => (
+                      {dayAppointments.slice(0, 3).map((apt, i) => (
                         <View
                           key={i}
                           style={[
                             styles.appointmentDot,
+                            { backgroundColor: apt.color },
                             i === 2 && dayAppointments.length > 3 && styles.moreDot
                           ]}
                         />
@@ -822,15 +725,12 @@ export const BusinessBookingsScreen = () => {
                 .map(appointment => (
                   <TouchableOpacity
                     key={appointment.id}
-                    style={styles.monthAppointmentItem}
+                    style={[
+                      styles.monthAppointmentItem,
+                      { borderLeftWidth: 4, borderLeftColor: appointment.color }
+                    ]}
                     onPress={() => setSelectedAppointment(appointment)}
                   >
-                    <View 
-                      style={[
-                        styles.appointmentStatus, 
-                        { backgroundColor: STATUS_STYLES[appointment.status].color }
-                      ]} 
-                    />
                     <View style={styles.appointmentInfo}>
                       <Typography variant="caption" style={styles.appointmentTimeText}>
                         {appointment.start_time} - {appointment.end_time}
@@ -838,12 +738,21 @@ export const BusinessBookingsScreen = () => {
                       <Typography variant="body1" style={styles.appointmentClientText}>
                         {appointment.customer_name}
                       </Typography>
-                      <Typography variant="body2" style={styles.appointmentServiceText}>
+                      <Typography variant="body1" style={styles.appointmentServiceText}>
                         {appointment.service_name}
                       </Typography>
-                      <Typography variant="body1" style={styles.appointmentPriceText}>
-                        £{appointment.price}
-                      </Typography>
+                      <View style={styles.priceContainer}>
+                        <Typography variant="body1" style={styles.priceLabel}>Deposit:</Typography>
+                        <Typography variant="h2" style={styles.depositPrice}>
+                          £{appointment.deposit_price.toFixed(2)}
+                        </Typography>
+                      </View>
+                      <View style={styles.priceContainer}>
+                        <Typography variant="body1" style={styles.priceLabel}>Full Price:</Typography>
+                        <Typography variant="h2" style={styles.fullPrice}>
+                          £{appointment.full_price.toFixed(2)}
+                        </Typography>
+                      </View>
                     </View>
                   </TouchableOpacity>
                 ))}
@@ -896,8 +805,6 @@ export const BusinessBookingsScreen = () => {
             </View>
 
             <ScrollView style={styles.modalBody}>
-              {renderStatusBadge(selectedAppointment.status)}
-              
               {errorMessage && (
                 <View style={styles.errorContainer}>
                   <Typography variant="body1" style={styles.errorText}>
@@ -907,7 +814,7 @@ export const BusinessBookingsScreen = () => {
               )}
 
               <View style={styles.detailSection}>
-                <Typography variant="body2" style={styles.detailLabel}>Date & Time</Typography>
+                <Typography variant="body1" style={styles.detailLabel}>Date & Time</Typography>
                 <Typography variant="body1" style={styles.detailText}>
                   {new Date(selectedAppointment.date).toLocaleDateString('en-US', {
                     weekday: 'long',
@@ -922,50 +829,43 @@ export const BusinessBookingsScreen = () => {
               </View>
 
               <View style={styles.detailSection}>
-                <Typography variant="body2" style={styles.detailLabel}>Client Information</Typography>
+                <Typography variant="body1" style={styles.detailLabel}>Client Information</Typography>
                 <Typography variant="body1" style={styles.detailText}>
                   {selectedAppointment.customer_name}
                 </Typography>
-                <Typography variant="body2" style={styles.detailSubtext}>
+                <Typography variant="body1" style={styles.detailSubtext}>
                   {selectedAppointment.customer_email}
                 </Typography>
-                <Typography variant="body2" style={styles.detailSubtext}>
+                <Typography variant="body1" style={styles.detailSubtext}>
                   {selectedAppointment.customer_phone}
                 </Typography>
               </View>
 
               <View style={styles.detailSection}>
-                <Typography variant="body2" style={styles.detailLabel}>Service</Typography>
+                <Typography variant="body1" style={styles.detailLabel}>Service</Typography>
                 <Typography variant="body1" style={styles.detailText}>
                   {selectedAppointment.service_name}
                 </Typography>
-                <Typography variant="h3" style={styles.priceText}>
-                  £{selectedAppointment.price.toFixed(2)}
-                </Typography>
+                <View style={styles.priceContainer}>
+                  <Typography variant="body1" style={styles.priceLabel}>Deposit:</Typography>
+                  <Typography variant="h2" style={styles.depositPrice}>
+                    £{selectedAppointment.deposit_price.toFixed(2)}
+                  </Typography>
+                </View>
+                <View style={styles.priceContainer}>
+                  <Typography variant="body1" style={styles.priceLabel}>Full Price:</Typography>
+                  <Typography variant="h2" style={styles.fullPrice}>
+                    £{selectedAppointment.full_price.toFixed(2)}
+                  </Typography>
+                </View>
               </View>
 
               {selectedAppointment.notes && (
                 <View style={styles.detailSection}>
-                  <Typography variant="body2" style={styles.detailLabel}>Notes</Typography>
+                  <Typography variant="body1" style={styles.detailLabel}>Notes</Typography>
                   <Typography variant="body1" style={styles.detailText}>
                     {selectedAppointment.notes}
                   </Typography>
-                </View>
-              )}
-
-              {selectedAppointment.status !== 'COMPLETED' && (
-                <View style={styles.completionSection}>
-                  <Typography variant="body2" style={styles.detailLabel}>
-                    Completion Notes
-                  </Typography>
-                  <TextInput
-                    style={styles.notesInput}
-                    multiline
-                    numberOfLines={3}
-                    value={completionNotes}
-                    onChangeText={setCompletionNotes}
-                    placeholder="Add notes about the appointment completion..."
-                  />
                 </View>
               )}
             </ScrollView>
@@ -977,26 +877,6 @@ export const BusinessBookingsScreen = () => {
               >
                 <Typography variant="body1" style={styles.footerButtonText}>Close</Typography>
               </TouchableOpacity>
-              
-              {selectedAppointment.status !== 'COMPLETED' && (
-                <TouchableOpacity 
-                  style={[
-                    styles.footerButton, 
-                    styles.completeButton,
-                    isCompletingBooking && styles.disabledButton
-                  ]}
-                  onPress={() => handleComplete(selectedAppointment)}
-                  disabled={isCompletingBooking}
-                >
-                  {isCompletingBooking ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Typography variant="body1" style={styles.footerButtonText}>
-                      Complete
-                    </Typography>
-                  )}
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>
@@ -1292,6 +1172,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    borderLeftWidth: 4,
   },
   appointmentStatus: {
     width: 4,
@@ -1386,20 +1267,10 @@ const styles = StyleSheet.create({
   cancelButton: {
     backgroundColor: '#F5F5F5',
   },
-  editButton: {
-    backgroundColor: '#FF5722',
-  },
   footerButtonText: {
     fontSize: 16,
     fontWeight: '500',
     color: '#FFFFFF',
-  },
-  completeButton: {
-    backgroundColor: '#4CAF50',
-    marginHorizontal: 5,
-  },
-  disabledButton: {
-    backgroundColor: '#CCCCCC',
   },
   errorContainer: {
     marginBottom: 20,
@@ -1408,15 +1279,6 @@ const styles = StyleSheet.create({
     color: '#F44336',
     fontSize: 14,
     fontWeight: '500',
-  },
-  completionSection: {
-    marginBottom: 20,
-  },
-  notesInput: {
-    borderWidth: 1,
-    borderColor: '#CCCCCC',
-    borderRadius: 8,
-    padding: 12,
   },
   offlineBanner: {
     backgroundColor: '#FF5722',
@@ -1537,7 +1399,6 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#FF5722',
   },
   moreDot: {
     width: 6,
@@ -1662,5 +1523,25 @@ const styles = StyleSheet.create({
   },
   weekDayToday: {
     color: '#FF5722',
+  },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  priceLabel: {
+    fontSize: 14,
+    color: '#666666',
+    marginRight: 8,
+  },
+  depositPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FF5722',
+  },
+  fullPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4CAF50',
   },
 });

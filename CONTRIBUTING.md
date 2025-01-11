@@ -1,6 +1,6 @@
-# Contributing to Prim Mobile
+# Contributing to Priim Mobile
 
-Thank you for your interest in contributing to Prim Mobile! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to Priim Mobile! This document provides guidelines and instructions for contributing to the project.
 
 ## Table of Contents
 
@@ -21,11 +21,11 @@ By participating in this project, you agree to maintain a respectful and inclusi
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/prim_mobile.git
+   git clone https://github.com/YOUR_USERNAME/priim_mobile.git
    ```
 3. Add the upstream remote:
    ```bash
-   git remote add upstream https://github.com/ORIGINAL_OWNER/prim_mobile.git
+   git remote add upstream https://github.com/ORIGINAL_OWNER/priim_mobile.git
    ```
 4. Install dependencies:
    ```bash
@@ -170,4 +170,4 @@ If you have questions, please:
 2. Create a new issue with the 'question' label
 3. Ask in pull request comments
 
-Thank you for contributing to Prim Mobile!
+Thank you for contributing to Priim Mobile!

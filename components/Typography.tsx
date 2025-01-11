@@ -1,50 +1,48 @@
 import React from 'react';
-import { Text, TextStyle } from 'react-native';
+import { Text, TextStyle, StyleSheet } from 'react-native';
 
-type TypographyProps = {
-  variant?: 'h1' | 'h2' | 'body1' | 'button' | 'caption';
+interface TypographyProps {
+  variant?: 'h1' | 'h2' | 'body1' | 'body2' | 'caption';
   style?: TextStyle;
   children: React.ReactNode;
-};
+}
 
-export const Typography: React.FC<TypographyProps> = ({ 
-  variant = 'body1', 
-  style, 
-  children 
+export const Typography: React.FC<TypographyProps> = ({
+  variant = 'body1',
+  style,
+  children,
 }) => {
-  const getVariantStyle = (): TextStyle => {
-    switch (variant) {
-      case 'h1':
-        return {
-          fontSize: 24,
-          fontWeight: '700',
-        };
-      case 'h2':
-        return {
-          fontSize: 20,
-          fontWeight: '600',
-        };
-      case 'button':
-        return {
-          fontSize: 16,
-          fontWeight: '600',
-        };
-      case 'caption':
-        return {
-          fontSize: 12,
-          fontWeight: '400',
-        };
-      default:
-        return {
-          fontSize: 16,
-          fontWeight: '400',
-        };
-    }
-  };
-
   return (
-    <Text style={[getVariantStyle(), style]}>
+    <Text style={[styles[variant], style]}>
       {children}
     </Text>
   );
 };
+
+const styles = StyleSheet.create({
+  h1: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  h2: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  body1: {
+    fontSize: 16,
+    fontWeight: '400',
+    color: '#333333',
+  },
+  body2: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#666666',
+  },
+  caption: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#666666',
+  },
+});

@@ -38,52 +38,61 @@ type BusinessHours = {
   };
 };
 
+type RescheduleBookingParams = {
+  bookingId: string;
+  newStartTime: string;
+  newEndTime: string;
+  status: Database["public"]["Enums"]["booking_status"];
+};
+
+const DAYS_OF_WEEK = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday'
+];
+
 export class BookingService {
   // Get professional's working hours
   public async getWorkingHours(professionalId: string): Promise<BusinessHours | null> {
     try {
       console.log('Fetching working hours for professional:', professionalId);
       
-      // Fetch working hours as a single row with all days
-      const { data: workingHours, error } = await supabase
-        .from('professional_working_hours')  // Using the correct table name
+      // Get working hours from working_hours table
+      const { data: workingHoursData, error } = await supabase
+        .from('working_hours')
         .select('*')
-        .eq('professional_id', professionalId)
-        .single();
+        .eq('professional_id', professionalId);
+
+      console.log('Raw working hours data:', workingHoursData);
 
       if (error) {
         console.error('Error fetching working hours:', error);
-        // Instead of throwing, return default hours
-        const defaultHours = this.getDefaultWorkingHours();
-        return defaultHours;
+        return this.getDefaultWorkingHours();
       }
 
-      // Map numbers to days
-      const dayMap: { [key: number]: string } = {
-        1: 'Monday',
-        2: 'Tuesday',
-        3: 'Wednesday',
-        4: 'Thursday',
-        5: 'Friday',
-        6: 'Saturday',
-        7: 'Sunday'
-      };
-
-      if (!workingHours) {
+      if (!workingHoursData || workingHoursData.length === 0) {
+        console.log('No working hours found, using defaults');
         return this.getDefaultWorkingHours();
       }
 
       // Transform working hours data into BusinessHours format
-      const validatedHours: BusinessHours = {};
-
-      for (let i = 1; i <= 7; i++) {
-        validatedHours[dayMap[i]] = {
-          isOpen: workingHours[`is_open_${i}`] ?? true,
-          openTime: workingHours[`open_time_${i}`] || '09:00',
-          closeTime: workingHours[`close_time_${i}`] || '17:00'
+      const validatedHours: BusinessHours = DAYS_OF_WEEK.reduce((acc, day, index) => {
+        const dayHours = workingHoursData.find(wh => wh.day_of_week === index + 1);
+        console.log(`Processing ${day} (day_of_week=${index + 1}):`, dayHours);
+        
+        acc[day] = {
+          isOpen: dayHours?.is_open ?? true,
+          openTime: dayHours?.start_time ?? '09:00',
+          closeTime: dayHours?.end_time ?? '17:00'
         };
-      }
+        return acc;
+      }, {} as BusinessHours);
 
+      console.log('Transformed working hours:', validatedHours);
       return validatedHours;
     } catch (error) {
       console.error('Error in getWorkingHours:', error);
@@ -92,53 +101,46 @@ export class BookingService {
   }
 
   private getDefaultWorkingHours(): BusinessHours {
-    const dayMap: { [key: number]: string } = {
-      1: 'Monday',
-      2: 'Tuesday',
-      3: 'Wednesday',
-      4: 'Thursday',
-      5: 'Friday',
-      6: 'Saturday',
-      7: 'Sunday'
-    };
-
-    const defaultHours: BusinessHours = {};
-    
-    for (let i = 1; i <= 7; i++) {
-      defaultHours[dayMap[i]] = {
+    return DAYS_OF_WEEK.reduce((acc, day) => {
+      acc[day] = {
         isOpen: true,
         openTime: '09:00',
         closeTime: '17:00'
       };
-    }
-    
-    return defaultHours;
+      return acc;
+    }, {} as BusinessHours);
   }
 
   // Get available time slots for a specific date
   public async getAvailableTimeSlots(
     professionalId: string,
     date: Date,
-    duration: number
-  ): Promise<string[]> {
+    duration: number,
+    originalBookingId?: string
+  ): Promise<{ available: string[]; booked: string[] }> {
     try {
       // Get working hours for the day
       const workingHours = await this.getWorkingHours(professionalId);
+      
+      console.log('Debug - Professional ID:', professionalId);
+      console.log('Debug - Date:', date);
+      console.log('Debug - Working Hours:', workingHours);
+
       if (!workingHours) {
         console.log('No working hours found');
-        return [];
+        return { available: [], booked: [] };
       }
 
-      const dayOfWeek = date.getDay();
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const daySchedule = workingHours[days[dayOfWeek]];
+      // Convert JavaScript's 0-6 (Sun-Sat) to our 1-7 (Mon-Sun) format
+      const jsDay = date.getDay();
+      const dayIndex = jsDay === 0 ? 6 : jsDay - 1;
+
+      const daySchedule = workingHours[DAYS_OF_WEEK[dayIndex]];
 
       if (!daySchedule || !daySchedule.isOpen) {
-        console.log('Day is not a working day:', days[dayOfWeek]);
-        return [];
+        console.log('Day is not a working day:', DAYS_OF_WEEK[dayIndex]);
+        return { available: [], booked: [] };
       }
-
-      console.log('Working hours for', days[dayOfWeek], ':', daySchedule);
 
       // Get existing bookings for the date
       const startOfDay = new Date(date);
@@ -147,29 +149,55 @@ export class BookingService {
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
 
-      const { data: bookings, error } = await supabase
+      // First get the professional profile ID
+      const { data: professional, error: profError } = await supabase
+        .from('professionals')
+        .select('id, user_id')
+        .eq('id', professionalId)
+        .single();
+
+      if (profError) throw profError;
+
+      const { data: profProfile, error: profileError } = await supabase
+        .from('professional_profiles')
+        .select('id')
+        .eq('user_id', professional.user_id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Get existing bookings with the correct professional_id
+      let bookingsQuery = supabase
         .from('bookings')
-        .select('*')
-        .eq('professional_id', professionalId)
-        .gte('start_time', startOfDay.toISOString())
-        .lte('start_time', endOfDay.toISOString())
-        .neq('status', 'CANCELLED');
+        .select(`
+          start_time,
+          end_time,
+          status
+        `)
+        .eq('professional_id', profProfile.id)
+        .in('status', ['CONFIRMED', 'PENDING']);
+
+      // If rescheduling, exclude the original booking from conflicts
+      if (originalBookingId) {
+        bookingsQuery = bookingsQuery.neq('id', originalBookingId);
+      }
+
+      const { data: bookings, error } = await bookingsQuery;
+
+      console.log('Debug - Existing Bookings:', bookings);
 
       if (error) throw error;
 
-      // Generate available time slots
-      const slots: string[] = [];
+      const availableSlots: string[] = [];
+      const bookedSlots: string[] = [];
       const [openHour, openMinute] = daySchedule.openTime.split(':').map(Number);
       const [closeHour, closeMinute] = daySchedule.closeTime.split(':').map(Number);
 
-      console.log('Generating slots between', `${openHour}:${openMinute}`, 'and', `${closeHour}:${closeMinute}`);
-
-      for (let hour = openHour; hour < closeHour; hour++) {
+      // Generate time slots
+      for (let hour = openHour; hour <= closeHour; hour++) {
         for (let minute = 0; minute < 60; minute += 30) {
-          // Skip times before opening if we're on the opening hour
           if (hour === openHour && minute < openMinute) continue;
-          // Skip times after closing if we're on the closing hour
-          if (hour === closeHour && minute > closeMinute) continue;
+          if (hour === closeHour && minute > 0) continue;
 
           const slotTime = new Date(date);
           slotTime.setHours(hour, minute, 0, 0);
@@ -178,33 +206,84 @@ export class BookingService {
           slotEndTime.setMinutes(slotEndTime.getMinutes() + duration);
 
           // Check if slot is in the past
-          if (slotTime < new Date()) {
-            console.log('Skipping past slot:', format(slotTime, 'HH:mm'));
+          const now = new Date();
+          if (slotTime < now) {
+            console.log('Debug - Past Slot:', format(slotTime, 'HH:mm'));
+            bookedSlots.push(format(slotTime, 'HH:mm'));
             continue;
           }
 
-          const isSlotAvailable = !bookings?.some(booking => {
+          // Calculate end time in total minutes for comparison
+          const slotEndTotalMinutes = (slotEndTime.getHours() * 60) + slotEndTime.getMinutes();
+          const closingTotalMinutes = (closeHour * 60) + closeMinute;
+
+          // Check if the service would end after closing time
+          if (slotEndTotalMinutes > closingTotalMinutes) {
+            console.log('Debug - Service would end after closing time:', {
+              slot: format(slotTime, 'HH:mm'),
+              slotEnd: format(slotEndTime, 'HH:mm'),
+              closeTime: `${closeHour}:${closeMinute}`,
+              slotEndMinutes: slotEndTotalMinutes,
+              closingMinutes: closingTotalMinutes
+            });
+            bookedSlots.push(format(slotTime, 'HH:mm'));
+            continue;
+          }
+
+          // Check if slot overlaps with any existing booking
+          const hasOverlap = bookings?.some(booking => {
             const bookingStart = new Date(booking.start_time);
             const bookingEnd = new Date(booking.end_time);
-            const hasConflict = (
-              (slotTime >= bookingStart && slotTime < bookingEnd) ||
-              (slotEndTime > bookingStart && slotEndTime <= bookingEnd) ||
-              (slotTime <= bookingStart && slotEndTime >= bookingEnd)
-            );
-            if (hasConflict) {
-              console.log('Slot conflicts with booking:', format(slotTime, 'HH:mm'), '-', format(slotEndTime, 'HH:mm'));
+
+            // A slot overlaps if:
+            // The proposed slot's time range [slotTime, slotEndTime] overlaps with
+            // the existing booking's time range [bookingStart, bookingEnd]
+            const overlaps = !(slotEndTime <= bookingStart || slotTime >= bookingEnd);
+
+            if (overlaps) {
+              console.log('Overlap detected:', {
+                slot: {
+                  start: format(slotTime, 'HH:mm'),
+                  end: format(slotEndTime, 'HH:mm'),
+                  duration: `${duration} minutes`
+                },
+                booking: {
+                  start: format(bookingStart, 'HH:mm'),
+                  end: format(bookingEnd, 'HH:mm')
+                },
+                reason: 'Slot overlaps with existing booking'
+              });
             }
-            return hasConflict;
+
+            return overlaps;
           });
 
-          if (isSlotAvailable) {
-            console.log('Adding available slot:', format(slotTime, 'HH:mm'));
-            slots.push(format(slotTime, 'HH:mm'));
+          const timeStr = format(slotTime, 'HH:mm');
+          if (hasOverlap || slotEndTotalMinutes > closingTotalMinutes) {
+            console.log('Debug - Slot unavailable:', {
+              slot: timeStr,
+              reason: slotEndTotalMinutes > closingTotalMinutes ? 'Would end after closing' : 'Overlaps with booking',
+              slotStart: format(slotTime, 'HH:mm'),
+              slotEnd: format(slotEndTime, 'HH:mm'),
+              closingTime: `${closeHour}:${closeMinute}`
+            });
+            bookedSlots.push(timeStr);
+          } else {
+            console.log('Debug - Available Slot:', timeStr, {
+              slotStart: format(slotTime, 'HH:mm'),
+              slotEnd: format(slotEndTime, 'HH:mm')
+            });
+            availableSlots.push(timeStr);
           }
         }
       }
 
-      return slots;
+      console.log('Debug - Final Slots:', {
+        available: availableSlots,
+        booked: bookedSlots
+      });
+
+      return { available: availableSlots, booked: bookedSlots };
     } catch (error) {
       console.error('Error getting available time slots:', error);
       throw new Error('Failed to get available time slots');
@@ -232,6 +311,7 @@ export class BookingService {
         .single();
 
       if (customerError || !customerProfile) {
+        console.error('Customer profile error:', customerError);
         throw { 
           code: 'CUSTOMER_ERROR', 
           message: 'Customer profile not found',
@@ -247,21 +327,57 @@ export class BookingService {
       const endTime = new Date(bookingDate);
       endTime.setMinutes(endTime.getMinutes() + params.serviceDuration);
 
-      // Check for booking conflicts using basic comparison operators
+      // Check for booking conflicts
       const { data: existingBookings, error: conflictError } = await supabase
         .from('bookings')
-        .select('id')
+        .select('id, start_time, end_time')
         .eq('professional_id', params.professionalId)
         .in('status', ['CONFIRMED', 'PENDING'])
-        .lt('start_time', endTime.toISOString())
-        .gt('end_time', bookingDate.toISOString());
+        .or(
+          `and(start_time.gte.${bookingDate.toISOString()},start_time.lt.${endTime.toISOString()}),` +
+          `and(end_time.gt.${bookingDate.toISOString()},end_time.lte.${endTime.toISOString()}),` +
+          `and(start_time.lte.${bookingDate.toISOString()},end_time.gte.${endTime.toISOString()})`
+        );
 
       if (conflictError) {
         console.error('Error checking booking conflicts:', conflictError);
-        throw new Error('Failed to check booking availability');
+        throw {
+          code: 'CONFLICT_CHECK_ERROR',
+          message: 'Failed to check booking availability',
+          details: conflictError
+        };
       }
 
-      if (existingBookings && existingBookings.length > 0) {
+      // Simplified overlap check
+      const hasConflict = existingBookings?.some(booking => {
+        const bookingStart = new Date(booking.start_time);
+        const bookingEnd = new Date(booking.end_time);
+        
+        // Check both directions of overlap
+        return (
+          (bookingDate < bookingEnd && endTime > bookingStart) ||
+          (bookingStart < endTime && bookingEnd > bookingDate)
+        );
+      });
+
+      // Add more detailed logging
+      console.log('Time details:', {
+        startDateTime: bookingDate.toISOString(),
+        endDateTime: endTime.toISOString(),
+        localStartTime: bookingDate.toLocaleString(),
+        localEndTime: endTime.toLocaleString(),
+        selectedTime: params.time,
+        selectedTimeHours: hours,
+        selectedTimeMinutes: minutes,
+        serviceDuration: params.serviceDuration,
+        hasConflict,
+        existingBookings: existingBookings?.map(b => ({
+          start: new Date(b.start_time).toLocaleString(),
+          end: new Date(b.end_time).toLocaleString()
+        }))
+      });
+
+      if (hasConflict) {
         return {
           success: false,
           error: {
@@ -287,13 +403,30 @@ export class BookingService {
         .select()
         .single();
 
-      if (bookingError) throw bookingError;
+      if (bookingError) {
+        console.error('Booking creation error:', bookingError);
+        throw {
+          code: 'BOOKING_CREATE_ERROR',
+          message: 'Failed to create booking',
+          details: bookingError
+        };
+      }
+
+      if (!booking) {
+        throw {
+          code: 'BOOKING_CREATE_ERROR',
+          message: 'No booking data returned after creation'
+        };
+      }
+
+      console.log('Booking created successfully:', booking);
 
       return {
         success: true,
         bookingId: booking.id,
         formattedDateTime: format(bookingDate, 'PPpp')
       };
+
     } catch (error) {
       console.error('Error in createBooking:', error);
       return {
@@ -301,6 +434,72 @@ export class BookingService {
         error: {
           code: error.code || 'BOOKING_ERROR',
           message: error.message || 'Failed to create booking',
+          details: error.details || error
+        }
+      };
+    }
+  }
+
+  // Add this new method to handle rescheduling
+  public async rescheduleBooking(params: RescheduleBookingParams): Promise<BookingResult> {
+    try {
+      const { bookingId, newStartTime, newEndTime, status } = params;
+
+      // First get the booking details to get customer_id, professional_id, and service_id
+      const { data: booking, error: bookingError } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          customer_id,
+          professional_id,
+          service_id
+        `)
+        .eq('id', bookingId)
+        .single();
+
+      if (bookingError) {
+        console.error('Error fetching booking details:', bookingError);
+        throw bookingError;
+      }
+
+      if (!booking) {
+        throw new Error('Booking not found');
+      }
+
+      // Call the RPC function with the correct parameters
+      const { data: rescheduledBooking, error: rescheduleError } = await supabase
+        .rpc('reschedule_booking', {
+          p_old_booking_id: bookingId,
+          p_customer_id: booking.customer_id,
+          p_professional_id: booking.professional_id,
+          p_service_id: booking.service_id,
+          p_start_time: newStartTime,
+          p_end_time: newEndTime,
+          p_status: status
+        });
+
+      if (rescheduleError) {
+        console.error('Booking reschedule error details:', {
+          code: rescheduleError.code,
+          message: rescheduleError.message,
+          details: rescheduleError.details
+        });
+        throw rescheduleError;
+      }
+
+      return {
+        success: true,
+        bookingId: rescheduledBooking?.id || bookingId,
+        formattedDateTime: format(new Date(newStartTime), 'PPpp')
+      };
+
+    } catch (error) {
+      console.error('Error in rescheduleBooking:', error);
+      return {
+        success: false,
+        error: {
+          code: error.code || 'RESCHEDULE_ERROR',
+          message: error.message || 'Failed to reschedule booking',
           details: error.details || error
         }
       };

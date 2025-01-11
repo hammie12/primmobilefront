@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Your App Name",
-    "slug": "PrimMobile",
+    "slug": "PriimMobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -47,10 +47,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow PrimMobile to use your location to show nearby services."
+          "locationAlwaysAndWhenInUsePermission": "Allow PriimMobile to use your location to show nearby services."
         }
-      ],
-      "react-native-svg"
+      ]
     ]
   }
 }

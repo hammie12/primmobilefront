@@ -127,7 +127,7 @@ class AuthService {
       console.log('[AuthService.resetPassword] Starting password reset process for:', email);
 
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'primemobile://reset-password',
+        redirectTo: 'priimmobile://reset-password',
       });
 
       if (error) {

@@ -1,0 +1,1 @@
+emailRedirectTo: 'priim://auth/callback', 

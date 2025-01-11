@@ -61,40 +61,97 @@ export const CustomerRewardsScreen = () => {
 
       if (customerError) throw customerError;
 
-      // Get total amount spent from confirmed bookings
+      // Get total amount spent from bookings
       const { data: totalSpentData, error: spentError } = await supabase
         .from('bookings')
         .select(`
-          services (
-            price
-          )
+          services:service_id (
+            deposit_price,
+            full_price
+          ),
+          status
         `)
         .eq('customer_id', customerProfile.id)
-        .eq('status', 'CONFIRMED');
+        .in('status', ['PENDING', 'CONFIRMED', 'COMPLETED']);
 
       if (spentError) {
         console.error('Error fetching total spent:', spentError);
       }
 
-      // Calculate total spent
-      const totalSpent = totalSpentData?.reduce((sum, booking) => 
-        sum + (booking.services?.price || 0), 0) || 0;
+      // Calculate total points based on booking status
+      const totalPoints = totalSpentData?.reduce((sum, booking) => {
+        const service = booking.services as any;
+        
+        switch (booking.status) {
+          case 'COMPLETED':
+            // Use full_price for completed bookings
+            return sum + (service?.full_price || 0);
+            
+          case 'CONFIRMED':
+          case 'PENDING':
+            // Use deposit_price for pending or confirmed bookings
+            return sum + (service?.deposit_price || 0);
+            
+          default:
+            return sum;
+        }
+      }, 0) || 0;
 
-      // Get rewards profile
-      const { data: rewardsProfile, error: rewardsError } = await supabase
+      // Get or create rewards profile
+      let rewardsProfile;
+      const { data: existingProfile, error: fetchError } = await supabase
         .from('rewards_profiles')
         .select('*')
         .eq('customer_profile_id', customerProfile.id)
-        .single();
+        .maybeSingle();
 
-      if (rewardsError) {
-        console.error('Rewards error:', rewardsError);
+      if (fetchError) {
+        console.error('Error fetching rewards profile:', fetchError);
       }
 
-      // Set user rewards from rewards profile and total spent
+      // If no profile exists, create one with the calculated points
+      if (!existingProfile) {
+        const { data: newProfile, error: createError } = await supabase
+          .from('rewards_profiles')
+          .insert([
+            { 
+              customer_profile_id: customerProfile.id,
+              points: totalPoints,
+              tier: 'STANDARD'
+            }
+          ])
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('Error creating rewards profile:', createError);
+        } else {
+          rewardsProfile = newProfile;
+        }
+      } else {
+        // If profile exists, update the points if they're different
+        if (existingProfile.points !== totalPoints) {
+          const { data: updatedProfile, error: updateError } = await supabase
+            .from('rewards_profiles')
+            .update({ points: totalPoints })
+            .eq('id', existingProfile.id)
+            .select()
+            .single();
+
+          if (updateError) {
+            console.error('Error updating rewards points:', updateError);
+          } else {
+            rewardsProfile = updatedProfile;
+          }
+        } else {
+          rewardsProfile = existingProfile;
+        }
+      }
+
+      // Set user rewards using the rewards profile data
       setUserRewards({
-        total_points: totalSpent, // Set points equal to total spent
-        bookings_count: 0
+        total_points: rewardsProfile?.points || 0,
+        bookings_count: totalSpentData?.length || 0
       });
 
       // Fetch recent bookings
@@ -103,18 +160,20 @@ export const CustomerRewardsScreen = () => {
         .select(`
           id,
           start_time,
+          status,
           service_id,
           professional_id,
-          services (
+          services:service_id (
             name,
-            price
+            deposit_price,
+            full_price
           ),
-          professional_profiles (
+          professional_profiles:professional_id (
             business_name
           )
         `)
         .eq('customer_id', customerProfile.id)
-        .eq('status', 'CONFIRMED')
+        .in('status', ['CONFIRMED', 'COMPLETED'])
         .order('start_time', { ascending: false })
         .limit(3);
 
@@ -123,30 +182,70 @@ export const CustomerRewardsScreen = () => {
         throw bookingsError;
       }
 
-      console.log('Fetched bookings:', bookings);
-
       // Transform booking data into activity format
-      const transformedActivities = (bookings || []).map(booking => ({
-        id: booking.id,
-        type: 'earned' as const,
-        points: booking.services?.price || 0, // Changed to 1 point per £1 spent
-        description: `Booking with ${booking.professional_profiles?.business_name}`,
-        created_at: booking.start_time,
-        service_name: booking.services?.name || 'Service',
-        business_name: booking.professional_profiles?.business_name || 'Business',
-        amount: booking.services?.price || 0,
-        user_id: user.id // Add missing user_id field
-      }));
+      const transformedActivities = (bookings || []).map(booking => {
+        const service = booking.services as any;
+        const points = booking.status === 'COMPLETED' 
+          ? (service?.full_price || 0)  // Full price for completed
+          : (service?.deposit_price || 0);  // Deposit price for others
+        
+        return {
+          id: booking.id,
+          type: 'earned' as const,
+          points: points,
+          description: `Booking with ${(booking.professional_profiles as any)?.business_name}`,
+          created_at: booking.start_time,
+          service_name: service?.name || 'Service',
+          business_name: (booking.professional_profiles as any)?.business_name || 'Business',
+          amount: points, // Use the same points value for amount
+          user_id: user.id,
+          status: booking.status
+        };
+      });
 
-      console.log('Transformed activities:', transformedActivities);
-      
       setActivities(transformedActivities);
 
-      // Update bookings count in user rewards
-      setUserRewards(prev => ({
-        ...prev,
-        bookings_count: bookings?.length || 0
-      }));
+      console.log('Calculated total points:', totalPoints);
+
+      if (existingProfile && existingProfile.points !== totalPoints) {
+        const { error: updateError } = await supabase
+          .from('rewards_profiles')
+          .update({ points: totalPoints })
+          .eq('id', existingProfile.id);
+
+        if (updateError) {
+          console.error('Error updating rewards points:', updateError);
+        }
+      }
+
+      // Add this query to check booking statuses
+      const { data: bookingStatuses, error: statusError } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          status,
+          start_time,
+          services:service_id (
+            name,
+            deposit_price,
+            full_price
+          )
+        `)
+        .eq('customer_id', customerProfile.id)
+        .order('start_time', { ascending: false });
+
+      if (statusError) {
+        console.error('Error fetching booking statuses:', statusError);
+      } else {
+        console.log('All customer bookings:', bookingStatuses?.map(booking => ({
+          id: booking.id,
+          status: booking.status,
+          date: new Date(booking.start_time).toLocaleDateString(),
+          service: booking.services?.name,
+          deposit: booking.services?.deposit_price,
+          full_price: booking.services?.full_price
+        })));
+      }
 
     } catch (error) {
       console.error('Error loading rewards data:', error);
@@ -165,7 +264,7 @@ export const CustomerRewardsScreen = () => {
         <View style={styles.pointsCardLeft}>
           <View style={styles.currentTier}>
             <MaterialCommunityIcons name="crown" size={24} color="#FFD700" />
-            <Typography variant="body2" style={styles.tierLabel}>PriimPoints</Typography>
+            <Typography variant="body1" style={styles.tierLabel}>PriimPoints</Typography>
           </View>
           <Typography variant="h1" style={styles.pointsText}>{userRewards.total_points}</Typography>
           <Typography variant="caption" style={styles.pointsLabel}>POINTS BALANCE</Typography>
@@ -220,7 +319,7 @@ export const CustomerRewardsScreen = () => {
           </Typography>
         </View>
         <View style={styles.rewardPoints}>
-          <Typography variant="body2" style={styles.pointsRequired}>250</Typography>
+          <Typography variant="body1" style={styles.pointsRequired}>250</Typography>
           <Typography variant="caption" style={styles.pointsLabel}>points</Typography>
         </View>
       </TouchableOpacity>
@@ -577,6 +676,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: '#FF5722',
     fontWeight: '500',
+    fontSize: 32,
   },
   noBookingsContainer: {
     alignItems: 'center',

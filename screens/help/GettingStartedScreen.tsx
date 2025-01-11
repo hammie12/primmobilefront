@@ -16,11 +16,11 @@ export const GettingStartedScreen = () => {
       <ScrollView style={styles.container}>
         <SettingsSection>
           <Typography variant="h2" style={styles.heading}>
-            Welcome to Prim
+            Welcome to Priim
           </Typography>
           
           <Typography variant="body1" style={styles.text}>
-            Prim is your all-in-one solution for managing your beauty or wellness business. 
+            Priim is your all-in-one solution for managing your beauty or wellness business. 
             This guide will help you get started with the essential features.
           </Typography>
 

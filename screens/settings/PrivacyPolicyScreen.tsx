@@ -117,7 +117,7 @@ export const PrivacyPolicyScreen = () => {
             10. Contact Us
           </Typography>
           <Typography variant="body1" style={styles.text}>
-            If you have questions about this Privacy Policy or our privacy practices, please contact our Privacy Team at privacy@prim.com.
+            If you have questions about this Privacy Policy or our privacy practices, please contact our Privacy Team at privacy@priim.com.
           </Typography>
         </SettingsSection>
       </ScrollView>

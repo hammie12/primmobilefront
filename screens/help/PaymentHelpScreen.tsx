@@ -20,7 +20,7 @@ export const PaymentHelpScreen = () => {
           </Typography>
           
           <Typography variant="body1" style={styles.text}>
-            Prim supports various payment methods to make transactions smooth for you and your clients.
+            Priim supports various payment methods to make transactions smooth for you and your clients.
           </Typography>
 
           <Typography variant="h2" style={styles.heading}>

@@ -18,6 +18,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import { BookingService } from '../../lib/services/bookingService';
 import { supabase } from '../../lib/supabase';
+import { showMessage } from 'react-native-flash-message';
 
 interface RouteParams {
   professionalId: string;
@@ -26,6 +27,8 @@ interface RouteParams {
   serviceDuration: string;
   professionalName: string;
   serviceId: string;
+  depositPrice: number;
+  fullPrice: number;
   isRescheduling?: boolean;
   originalBookingId?: string;
   originalBookingStatus?: string;
@@ -42,6 +45,8 @@ type RootStackParamList = {
     selectedTime: string;
     professionalId: string;
     serviceId: string;
+    depositPrice: number;
+    fullPrice: number;
     isRescheduling?: boolean;
     originalBookingId?: string;
     originalBookingStatus?: string;
@@ -59,13 +64,25 @@ type BusinessHours = {
   };
 };
 
+const DAYS_OF_WEEK = [
+  'Monday',    // 1
+  'Tuesday',   // 2
+  'Wednesday', // 3
+  'Thursday',  // 4
+  'Friday',    // 5
+  'Saturday',  // 6
+  'Sunday'     // 7
+];
+
 export const BookingScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute();
   const { 
     professionalId, 
     serviceName, 
-    servicePrice, 
+    servicePrice,
+    depositPrice,
+    fullPrice,
     serviceDuration, 
     professionalName, 
     serviceId, 
@@ -82,7 +99,8 @@ export const BookingScreen = () => {
   console.log('Professional ID:', professionalId);
   console.log('Service Details:', {
     name: serviceName,
-    price: servicePrice,
+    depositPrice,
+    fullPrice,
     duration: serviceDuration,
     id: serviceId
   });
@@ -123,15 +141,31 @@ export const BookingScreen = () => {
       setLoading(true);
       setError(null);
       
-      // Get the professional's working hours directly using professional_id
-      const hours = await bookingService.getWorkingHours(professionalId);
-      
-      if (!hours) {
-        setError('Professional has not set their working hours');
-        return;
+      // Fetch working hours from the working_hours table
+      const { data: workingHours, error: workingHoursError } = await supabase
+        .from('working_hours')
+        .select('*')
+        .eq('professional_id', professionalId);
+
+      if (workingHoursError) {
+        console.error('Error fetching working hours:', workingHoursError);
+        throw workingHoursError;
       }
-      
-      setWorkingHours(hours);
+
+      // Transform working hours into the expected format
+      const businessHours = DAYS_OF_WEEK.reduce((acc, day, index) => {
+        // Add 1 to index to match 1-7 range
+        const dayHours = workingHours?.find(wh => wh.day_of_week === index + 1);
+        acc[day] = {
+          isOpen: dayHours?.is_open ?? false,
+          openTime: dayHours?.start_time ?? '09:00',
+          closeTime: dayHours?.end_time ?? '17:00'
+        };
+        return acc;
+      }, {} as Record<string, { isOpen: boolean; openTime: string; closeTime: string }>);
+
+      console.log('Transformed business hours:', businessHours);
+      setWorkingHours(businessHours);
     } catch (error) {
       console.error('Error fetching working hours:', error);
       setError('Failed to load professional\'s working hours');
@@ -151,138 +185,70 @@ export const BookingScreen = () => {
         return;
       }
 
-      // Get the day name from selected date
-      const dayOfWeek = selectedDate.getDay();
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const daySchedule = workingHours[days[dayOfWeek]];
+      // Call BookingService to get available and booked slots
+      const bookingService = new BookingService();
+      const slots = await bookingService.getAvailableTimeSlots(
+        professionalId,
+        selectedDate,
+        parseInt(serviceDuration),
+        isRescheduling ? originalBookingId : undefined
+      );
 
-      if (!daySchedule || !daySchedule.isOpen) {
-        setAvailableSlots([]);
-        setBookedSlots([]);
-        return;
-      }
-
-      // Get existing bookings for the selected date
-      const startOfDay = new Date(selectedDate);
-      startOfDay.setHours(0, 0, 0, 0);
+      // Update state with the fetched slots
+      setAvailableSlots(slots.available);
+      setBookedSlots(slots.booked);
       
-      const endOfDay = new Date(selectedDate);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      const { data: existingBookings, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('start_time, end_time')
-        .eq('professional_id', professionalId)
-        .gte('start_time', startOfDay.toISOString())
-        .lte('start_time', endOfDay.toISOString())
-        .in('status', ['CONFIRMED', 'PENDING']);
-
-      if (bookingsError) {
-        console.error('Error fetching existing bookings:', bookingsError);
-        throw bookingsError;
-      }
-
-      // Convert booking times to Date objects
-      const bookings = (existingBookings || []).map(booking => ({
-        start: new Date(booking.start_time),
-        end: new Date(booking.end_time)
-      }));
-
-      const availableSlots: string[] = [];
-      const unavailableSlots: string[] = [];
-      const [openHour, openMinute] = daySchedule.openTime.split(':').map(Number);
-      const [closeHour, closeMinute] = daySchedule.closeTime.split(':').map(Number);
-
-      // Current time
-      const now = new Date();
-      const isToday = selectedDate.toDateString() === now.toDateString();
-
-      for (let hour = openHour; hour < closeHour; hour++) {
-        for (let minute = 0; minute < 60; minute += 30) {
-          // Skip if before opening time or after closing time
-          if (hour === openHour && minute < openMinute) continue;
-          if (hour === closeHour && minute > closeMinute) continue;
-
-          const slotTime = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-          
-          // Create a date object for this slot
-          const slotDate = new Date(selectedDate);
-          slotDate.setHours(hour, minute, 0, 0);
-
-          // Skip if the slot is in the past
-          if (isToday && slotDate < now) {
-            continue;
-          }
-
-          // Calculate slot end time (add service duration)
-          const slotEndDate = new Date(slotDate);
-          slotEndDate.setMinutes(slotEndDate.getMinutes() + parseInt(serviceDuration));
-
-          // Check if slot overlaps with any existing booking
-          const isOverlapping = bookings.some(booking => {
-            const overlap = (
-              (slotDate >= booking.start && slotDate < booking.end) ||
-              (slotEndDate > booking.start && slotEndDate <= booking.end) ||
-              (slotDate <= booking.start && slotEndDate >= booking.end)
-            );
-
-            if (overlap) {
-              console.log('Slot overlap detected:', {
-                slot: {
-                  start: slotDate.toISOString(),
-                  end: slotEndDate.toISOString()
-                },
-                booking: {
-                  start: booking.start.toISOString(),
-                  end: booking.end.toISOString()
-                }
-              });
-            }
-
-            return overlap;
-          });
-
-          if (isOverlapping) {
-            unavailableSlots.push(slotTime);
-          } else {
-            availableSlots.push(slotTime);
-          }
-        }
-      }
-
-      console.log('Available slots:', availableSlots);
-      console.log('Booked slots:', unavailableSlots);
-      setAvailableSlots(availableSlots);
-      setBookedSlots(unavailableSlots);
+      console.log('Slots fetched:', {
+        available: slots.available.length,
+        booked: slots.booked.length
+      });
     } catch (error) {
-      console.error('Error generating time slots:', error);
-      setError('Failed to generate time slots');
+      console.error('Error fetching available slots:', error);
+      setError('Failed to load available time slots');
     } finally {
       setLoading(false);
     }
   };
 
   const handleTimeSlotPress = (time: string) => {
-    // Check if the slot is still available before setting it
+    // Create date objects for comparison
     const [hours, minutes] = time.split(':').map(Number);
-    const slotDate = new Date(selectedDate);
-    slotDate.setHours(hours, minutes, 0, 0);
+    const slotStartTime = new Date(selectedDate);
+    slotStartTime.setHours(hours, minutes, 0, 0);
+    
+    const slotEndTime = new Date(slotStartTime);
+    slotEndTime.setMinutes(slotEndTime.getMinutes() + parseInt(serviceDuration));
     
     const now = new Date();
-    if (slotDate < now) {
+    if (slotStartTime < now) {
       console.log('Time slot selection failed:', {
         selectedTime: time,
         reason: 'Time is in the past',
-        slotDate: slotDate.toISOString(),
+        slotDate: slotStartTime.toISOString(),
         currentTime: now.toISOString()
       });
       Alert.alert('Invalid Selection', 'Cannot book a time slot in the past');
       return;
     }
 
+    // Check if the slot is actually available
+    if (!availableSlots.includes(time) || bookedSlots.includes(time)) {
+      console.log('Time slot selection failed:', {
+        selectedTime: time,
+        reason: 'Slot is not available',
+        isAvailable: availableSlots.includes(time),
+        isBooked: bookedSlots.includes(time)
+      });
+      Alert.alert('Invalid Selection', 'This time slot is not available');
+      return;
+    }
+
     console.log('Time slot selected:', {
       time,
       date: selectedDate.toISOString(),
+      startTime: slotStartTime.toISOString(),
+      endTime: slotEndTime.toISOString(),
+      duration: serviceDuration,
       isAvailable: availableSlots.includes(time),
       isBooked: bookedSlots.includes(time)
     });
@@ -293,30 +259,64 @@ export const BookingScreen = () => {
   const handleConfirmBooking = async () => {
     if (!selectedTime) return;
     
-    console.log('Handling booking confirmation:', {
-      date: selectedDate.toISOString(),
-      time: selectedTime,
-      serviceName,
-      serviceDuration,
-      professionalId,
-      serviceId,
-      isRescheduling,
-      originalBookingId,
-      originalBookingStatus
-    });
+    try {
+      // Calculate start and end times
+      const [hours, minutes] = selectedTime.split(':').map(Number);
+      const startTime = new Date(selectedDate);
+      startTime.setHours(hours, minutes, 0, 0);
+      
+      const endTime = new Date(startTime);
+      endTime.setMinutes(endTime.getMinutes() + parseInt(serviceDuration));
 
-    if (isRescheduling && originalBookingId) {
-      try {
-        setLoading(true);
+      console.log('Attempting booking confirmation:', {
+        selectedTime,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        isRescheduling,
+        originalBookingId
+      });
 
-        // Calculate start and end times for the new booking
-        const [hours, minutes] = selectedTime.split(':').map(Number);
-        const startTime = new Date(selectedDate);
-        startTime.setHours(hours, minutes, 0, 0);
-        
-        const endTime = new Date(startTime);
-        endTime.setMinutes(endTime.getMinutes() + parseInt(serviceDuration));
+      if (isRescheduling && originalBookingId) {
+        // Handle rescheduling
+        const result = await bookingService.rescheduleBooking({
+          bookingId: originalBookingId,
+          newStartTime: startTime.toISOString(),
+          newEndTime: endTime.toISOString(),
+          status: 'CONFIRMED'
+        });
 
+        if (result.success) {
+          try {
+            showMessage({
+              message: "Booking Rescheduled",
+              type: "success",
+              description: `Your appointment has been rescheduled to ${result.formattedDateTime}`
+            });
+          } catch (messageError) {
+            Alert.alert(
+              "Booking Rescheduled",
+              `Your appointment has been rescheduled to ${result.formattedDateTime}`
+            );
+          }
+
+          // Update navigation to go back to CustomerBookings and reset the stack
+          navigation.reset({
+            index: 0,
+            routes: [
+              { 
+                name: 'CustomerBookings',
+                params: {
+                  refresh: true,
+                  selectedBookingId: originalBookingId,
+                  initialTab: 'upcoming'
+                }
+              }
+            ],
+          });
+        } else {
+          throw new Error(result.error?.message || 'Failed to reschedule booking');
+        }
+      } else {
         // Get the professional profile ID
         const { data: professional, error: profError } = await supabase
           .from('professionals')
@@ -326,6 +326,8 @@ export const BookingScreen = () => {
 
         if (profError) throw profError;
 
+        console.log('Found professional:', professional);
+
         const { data: profProfile, error: profileError } = await supabase
           .from('professional_profiles')
           .select('id')
@@ -334,61 +336,175 @@ export const BookingScreen = () => {
 
         if (profileError) throw profileError;
 
-        // Get the customer profile ID
-        const { data: customerProfile, error: customerError } = await supabase
-          .from('customer_profiles')
-          .select('id')
-          .eq('user_id', user?.id)
-          .single();
+        console.log('Found professional profile:', profProfile);
 
-        if (customerError) {
-          console.error('Error getting customer profile:', customerError);
-          throw customerError;
-        }
+        // Check for overlapping bookings one final time
+        const { data: existingBookings, error: bookingsError } = await supabase
+          .from('bookings')
+          .select('start_time, end_time')
+          .eq('professional_id', profProfile.id)
+          .in('status', ['CONFIRMED', 'PENDING'])
+          .or(`start_time.lte.${endTime.toISOString()},end_time.gte.${startTime.toISOString()}`);
 
-        if (!customerProfile) {
-          throw new Error('Customer profile not found');
-        }
+        if (bookingsError) throw bookingsError;
 
-        const professionalProfileId = profProfile.id;
-
-        // Call the reschedule_booking function with correct parameters
-        const { data, error } = await supabase.rpc('reschedule_booking', {
-          p_old_booking_id: originalBookingId,
-          p_start_time: startTime.toISOString(),
-          p_end_time: endTime.toISOString(),
-          p_professional_id: professionalProfileId,
-          p_service_id: serviceId,
-          p_customer_id: customerProfile.id,
-          p_status: 'CONFIRMED'
+        console.log('Checking for overlaps with existing bookings:', {
+          attemptedBookingStart: startTime.toISOString(),
+          attemptedBookingEnd: endTime.toISOString(),
+          existingBookings: existingBookings?.map(booking => ({
+            start: booking.start_time,
+            end: booking.end_time
+          }))
         });
 
-        if (error) throw error;
+        // Check for overlaps
+        const hasOverlap = existingBookings?.some(booking => {
+          const bookingStart = new Date(booking.start_time);
+          const bookingEnd = new Date(booking.end_time);
+          
+          console.log('Checking overlap for booking:', {
+            attemptedBooking: {
+              start: startTime.toISOString(),
+              end: endTime.toISOString()
+            },
+            existingBooking: {
+              start: bookingStart.toISOString(),
+              end: bookingEnd.toISOString()
+            },
+            conditions: {
+              condition1: startTime >= bookingStart && startTime < bookingEnd,
+              condition2: endTime > bookingStart && endTime <= bookingEnd,
+              condition3: startTime <= bookingStart && endTime >= bookingEnd,
+              condition4: bookingStart <= startTime && bookingEnd >= endTime
+            }
+          });
 
-        Alert.alert(
-          'Success',
-          'Your booking has been rescheduled successfully!',
-          [{ text: 'OK', onPress: () => navigation.navigate('CustomerBookings') }]
-        );
-      } catch (error) {
-        console.error('Error rescheduling booking:', error);
-        Alert.alert('Error', 'Failed to reschedule booking. Please try again.');
-      } finally {
-        setLoading(false);
+          const overlap = (
+            (startTime >= bookingStart && startTime < bookingEnd) ||
+            (endTime > bookingStart && endTime <= bookingEnd) ||
+            (startTime <= bookingStart && endTime >= bookingEnd) ||
+            (bookingStart <= startTime && bookingEnd >= endTime)
+          );
+
+          if (overlap) {
+            console.log('Found overlapping booking:', {
+              attemptedStart: startTime.toISOString(),
+              attemptedEnd: endTime.toISOString(),
+              conflictingStart: bookingStart.toISOString(),
+              conflictingEnd: bookingEnd.toISOString()
+            });
+          }
+
+          return overlap;
+        });
+
+        if (hasOverlap) {
+          console.log('Booking rejected due to overlap');
+          Alert.alert(
+            'Time Slot Unavailable',
+            'This time slot is no longer available. Please select a different time.',
+            [{ text: 'OK' }]
+          );
+          // Refresh available slots
+          fetchAvailableSlots();
+          return;
+        }
+
+        console.log('No overlaps found, proceeding with booking');
+
+        // If no overlap, proceed with navigation to payment
+        navigation.navigate('BookingPayment', {
+          serviceName,
+          servicePrice,
+          depositPrice,
+          fullPrice,
+          serviceDuration,
+          professionalName,
+          selectedDate: selectedDate.toISOString(),
+          selectedTime,
+          professionalId,
+          serviceId
+        });
       }
-    } else {
-      // Handle normal booking flow
-      navigation.navigate('BookingPayment', {
-        serviceName,
-        servicePrice,
-        serviceDuration,
-        professionalName,
-        selectedDate: selectedDate.toISOString(),
-        selectedTime,
-        professionalId,
-        serviceId
-      });
+    } catch (error) {
+      console.error('Error in handleConfirmBooking:', error);
+      try {
+        showMessage({
+          message: "Booking Failed",
+          type: "danger",
+          description: error.message || "Failed to process booking"
+        });
+      } catch (messageError) {
+        Alert.alert(
+          "Booking Failed",
+          error.message || "Failed to process booking"
+        );
+      }
     }
+  };
+
+  const renderTimeSlot = (time: string) => {
+    // Create date objects for comparison
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotStartTime = new Date(selectedDate);
+    slotStartTime.setHours(hours, minutes, 0, 0);
+    
+    const slotEndTime = new Date(slotStartTime);
+    slotEndTime.setMinutes(slotEndTime.getMinutes() + parseInt(serviceDuration));
+    
+    const now = new Date();
+    const isPast = slotStartTime < now;
+    const isBooked = bookedSlots.includes(time);
+    const isAvailable = availableSlots.includes(time);
+    const isSelected = selectedTime === time;
+
+    // Determine if this slot should be disabled
+    const isDisabled = !isAvailable || isPast || isBooked;
+
+    // Log the status of each time slot for debugging
+    console.log('Rendering time slot:', {
+      time,
+      startTime: slotStartTime.toISOString(),
+      endTime: slotEndTime.toISOString(),
+      duration: serviceDuration,
+      isAvailable,
+      isBooked,
+      isPast,
+      isSelected,
+      isDisabled
+    });
+
+    return (
+      <TouchableOpacity
+        key={time}
+        style={[
+          styles.slot,
+          isDisabled && styles.unavailableSlot,
+          isSelected && styles.selectedSlot,
+          isPast && styles.pastSlot
+        ]}
+        onPress={() => !isDisabled && handleTimeSlotPress(time)}
+        disabled={isDisabled}
+      >
+        <Text style={[
+          styles.slotText,
+          isDisabled && styles.unavailableSlotText,
+          isSelected && styles.selectedSlotText,
+          isPast && styles.pastSlotText
+        ]}>
+          {time}
+        </Text>
+        {isBooked && !isPast && (
+          <Text style={styles.bookedText}>Booked</Text>
+        )}
+        {isPast && (
+          <Text style={styles.pastText}>Past</Text>
+        )}
+        {!isDisabled && (
+          <Text style={styles.availableText}>Available</Text>
+        )}
+      </TouchableOpacity>
+    );
   };
 
   const renderTimeSlots = () => {
@@ -403,9 +519,9 @@ export const BookingScreen = () => {
     // Get all possible time slots for the day
     const allTimeSlots: string[] = [];
     if (workingHours) {
-      const dayOfWeek = selectedDate.getDay();
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const daySchedule = workingHours[days[dayOfWeek]];
+      const dayOfWeek = selectedDate.getDay(); // 0-6 (Sun-Sat)
+      const adjustedDayIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Convert to 0-6 (Mon-Sun)
+      const daySchedule = workingHours[DAYS_OF_WEEK[adjustedDayIndex]];
 
       if (daySchedule && daySchedule.isOpen) {
         const [openHour, openMinute] = daySchedule.openTime.split(':').map(Number);
@@ -437,25 +553,48 @@ export const BookingScreen = () => {
     return (
       <View style={styles.slotsGrid}>
         {allTimeSlots.map((slot) => {
-          const isAvailable = availableSlots.includes(slot);
-          const isBooked = bookedSlots.includes(slot);
-          const isSelected = selectedTime === slot;
-
-          // Create a date object for this slot to check if it's in the past
           const [hours, minutes] = slot.split(':').map(Number);
-          const slotDate = new Date(selectedDate);
-          slotDate.setHours(hours, minutes, 0, 0);
+          const slotStartTime = new Date(selectedDate);
+          slotStartTime.setHours(hours, minutes, 0, 0);
+          
+          const slotEndTime = new Date(slotStartTime);
+          slotEndTime.setMinutes(slotEndTime.getMinutes() + parseInt(serviceDuration));
+
+          // Check if this slot overlaps with any booked slots
+          const hasOverlap = bookedSlots.some(bookedSlot => {
+            const [bookedHours, bookedMinutes] = bookedSlot.split(':').map(Number);
+            const bookedStart = new Date(selectedDate);
+            bookedStart.setHours(bookedHours, bookedMinutes, 0, 0);
+            
+            const bookedEnd = new Date(bookedStart);
+            bookedEnd.setMinutes(bookedEnd.getMinutes() + parseInt(serviceDuration));
+
+            return !(slotEndTime <= bookedStart || slotStartTime >= bookedEnd);
+          });
+
+          const isAvailable = availableSlots.includes(slot) && !bookedSlots.includes(slot);
+          const isBooked = bookedSlots.includes(slot) || hasOverlap;
+          const isSelected = selectedTime === slot;
           const now = new Date();
-          const isPast = slotDate < now;
+          const isPast = slotStartTime < now;
+
+          // Determine if this slot should be disabled
+          const isDisabled = !isAvailable || isPast || isBooked;
 
           // Log the status of each time slot
           console.log('Time slot status:', {
             time: slot,
             date: selectedDate.toISOString(),
+            start: slotStartTime.toISOString(),
+            end: slotEndTime.toISOString(),
             isAvailable,
             isBooked,
+            hasOverlap,
             isPast,
-            isSelected
+            isSelected,
+            isDisabled,
+            inAvailableSlots: availableSlots.includes(slot),
+            inBookedSlots: bookedSlots.includes(slot)
           });
 
           return (
@@ -463,28 +602,28 @@ export const BookingScreen = () => {
               key={slot}
               style={[
                 styles.slot,
-                (isBooked || !isAvailable) && styles.unavailableSlot,
+                (isDisabled || hasOverlap) && styles.unavailableSlot,
                 isSelected && styles.selectedSlot,
                 isPast && styles.pastSlot
               ]}
-              onPress={() => isAvailable && !isPast && !isBooked && handleTimeSlotPress(slot)}
-              disabled={!isAvailable || isPast || isBooked}
+              onPress={() => !isDisabled && !hasOverlap && handleTimeSlotPress(slot)}
+              disabled={isDisabled || hasOverlap}
             >
               <Text style={[
                 styles.slotText,
-                (isBooked || !isAvailable) && styles.unavailableSlotText,
+                (isDisabled || hasOverlap) && styles.unavailableSlotText,
                 isSelected && styles.selectedSlotText,
                 isPast && styles.pastSlotText
               ]}>
                 {slot}
               </Text>
-              {isBooked && !isPast && (
+              {(isBooked || hasOverlap) && !isPast && (
                 <Text style={styles.bookedText}>Booked</Text>
               )}
               {isPast && (
                 <Text style={styles.pastText}>Past</Text>
               )}
-              {isAvailable && !isPast && !isBooked && (
+              {!isDisabled && !hasOverlap && (
                 <Text style={styles.availableText}>Available</Text>
               )}
             </TouchableOpacity>
@@ -537,7 +676,25 @@ export const BookingScreen = () => {
           </View>
           <View style={styles.detailRow}>
             <Ionicons name="cash-outline" size={20} color="#666" />
-            <Text style={styles.detailRowText}>£{servicePrice}</Text>
+            <View style={styles.priceContainer}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailRowText}>Full Price: £{fullPrice}</Text>
+              </View>
+              <View style={styles.paymentNoteContainer}>
+                <Text style={styles.pricingNote}>Pay to service provider</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.detailRow}>
+            <Ionicons name="card-outline" size={20} color="#666" />
+            <View style={styles.priceContainer}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailRowText}>Deposit: £{depositPrice}</Text>
+              </View>
+              <View style={styles.paymentNoteContainer}>
+                <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Priim</Text></Text>
+              </View>
+            </View>
           </View>
         </View>
         <TouchableOpacity 
@@ -581,7 +738,16 @@ export const BookingScreen = () => {
               </View>
               <View style={styles.detailItem}>
                 <Ionicons name="cash-outline" size={20} color="#666" />
-                <Text style={styles.detailText}>£{servicePrice}</Text>
+                <View style={styles.priceDetails}>
+                  <View style={styles.priceRow}>
+                    <Text style={styles.detailText}>Full Price: £{fullPrice}</Text>
+                    <Text style={styles.priceNote}>Pay to provider</Text>
+                  </View>
+                  <View style={styles.priceRow}>
+                    <Text style={styles.detailText}>Deposit: £{depositPrice}</Text>
+                    <Text style={styles.priceNote}>Pay on <Text style={styles.primText}>Priim</Text></Text>
+                  </View>
+                </View>
               </View>
             </View>
           </View>
@@ -697,23 +863,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#FF5722',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: {
-          width: 0,
-          height: 2,
-        },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
   },
   selectedSlot: {
     backgroundColor: '#FF5722',
+    borderColor: '#FF5722',
   },
   slotText: {
     color: '#FF5722',
@@ -834,18 +987,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   unavailableSlot: {
-    backgroundColor: '#F5F5F5',
-    borderColor: '#E0E0E0',
+    backgroundColor: '#F8F8F8',
+    borderColor: '#EEEEEE',
+    opacity: 0.7,
   },
   unavailableSlotText: {
-    color: '#999999',
+    color: '#BBB',
   },
   pastSlot: {
     backgroundColor: '#F0F0F0',
     borderColor: '#E0E0E0',
+    opacity: 0.6,
   },
   pastSlotText: {
-    color: '#BBBBBB',
+    color: '#CCC',
   },
   bookedText: {
     fontSize: 10,
@@ -876,5 +1031,58 @@ const styles = StyleSheet.create({
     color: '#FF5722',
     fontSize: 14,
     fontWeight: '500',
+  },
+  bookedSlot: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#E0E0E0',
+    opacity: 0.8,
+  },
+  bookedSlotText: {
+    color: '#999',
+  },
+  unavailableSlot: {
+    backgroundColor: '#F8F8F8',
+    borderColor: '#EEEEEE',
+    opacity: 0.7,
+  },
+  unavailableSlotText: {
+    color: '#BBB',
+  },
+  slotStatusText: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+  },
+  priceContainer: {
+    flex: 1,
+    gap: 4,
+  },
+  paymentNoteContainer: {
+    minHeight: 20,
+    justifyContent: 'center',
+  },
+  pricingNote: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+  },
+  primText: {
+    color: '#FF5722',
+    fontWeight: '600',
+  },
+  priceDetails: {
+    flex: 1,
+    gap: 4,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  priceNote: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
   },
 }); 

@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../supabase/client';
+import type { Database } from '../lib/supabase/schema';
 
 // Define the navigation param list type
 type RootStackParamList = {
@@ -31,6 +32,29 @@ type RootStackParamList = {
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
+type BookingWithRefs = Database['public']['Tables']['bookings']['Row'] & {
+  customer_id: Database['public']['Tables']['customer_profiles']['Row'] & {
+    user_id: {
+      email: string;
+    } | null;
+  } | null;
+  service_id: Database['public']['Tables']['services']['Row'] | null;
+};
+
+type Booking = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  customer_name: string;
+  service_name: string;
+  status: Database['public']['Enums']['booking_status'];
+  deposit_price: number;
+  full_price: number;
+  customer_email: string;
+  customer_phone: string;
+  notes: string;
+};
+
 export const HomeScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { user } = useAuth();
@@ -40,14 +64,7 @@ export const HomeScreen = () => {
     totalClients: 0,
   });
   const [professionalId, setProfessionalId] = useState<string | null>(null);
-  const [upcomingBookings, setUpcomingBookings] = useState<Array<{
-    id: string;
-    start_time: string;
-    customer_first_name: string | null;
-    customer_last_name: string | null;
-    service_name: string | null;
-    service_duration: number | null;
-  }>>([]);
+  const [upcomingBookings, setUpcomingBookings] = useState<Booking[]>([]);
 
   // First fetch the professional profile ID for the current user
   useEffect(() => {
@@ -93,8 +110,8 @@ export const HomeScreen = () => {
           .select(`
             id,
             service_id,
-            services (
-              price
+            services!inner (
+              full_price
             )
           `)
           .eq('professional_id', professionalId)
@@ -103,9 +120,10 @@ export const HomeScreen = () => {
 
         if (bookingsError) throw bookingsError;
 
-        // Calculate today's revenue
+        // Calculate today's revenue using full_price
         const revenueToday = todayBookings?.reduce((sum, booking) => {
-          return sum + ((booking.services as any)?.price || 0);
+          const service = booking.services as unknown as { full_price: number };
+          return sum + (service.full_price || 0);
         }, 0) || 0;
 
         // Fetch total unique clients (all time)
@@ -140,31 +158,63 @@ export const HomeScreen = () => {
     }
   }, [professionalId]);
 
-  // Add this effect to fetch upcoming bookings
+  // Add new effect for upcoming bookings
   useEffect(() => {
     const fetchUpcomingBookings = async () => {
       if (!professionalId) return;
 
       try {
-        const { data: bookings, error } = await supabase
+        console.log('Fetching upcoming bookings for professional:', professionalId);
+        
+        // Finally, check future confirmed bookings
+        const { data, error } = await supabase
           .from('professional_bookings')
           .select(`
             id,
             start_time,
+            end_time,
+            status,
             customer_first_name,
             customer_last_name,
             service_name,
-            service_duration
+            service_price
           `)
           .eq('professional_id', professionalId)
-          .eq('status', 'CONFIRMED')
+          .in('status', ['CONFIRMED', 'PENDING'])
           .gte('start_time', new Date().toISOString())
           .order('start_time', { ascending: true })
           .limit(3);
 
-        if (error) throw error;
-        
-        setUpcomingBookings(bookings || []);
+        console.log('Future confirmed bookings:', data);
+
+        if (error) {
+          console.error('Error fetching bookings:', error);
+          throw error;
+        }
+
+        // Transform the data
+        const formattedBookings: Booking[] = (data || [])
+          .filter(booking => booking.start_time && booking.end_time)
+          .map(booking => {
+            const customerName = `${booking.customer_first_name || ''} ${booking.customer_last_name || ''}`.trim() || 'Customer';
+
+            return {
+              id: booking.id || '',
+              start_time: booking.start_time || '',
+              end_time: booking.end_time || '',
+              customer_name: customerName,
+              service_name: booking.service_name || 'Unknown Service',
+              status: booking.status || 'PENDING',
+              deposit_price: 0, // These fields aren't available in the view
+              full_price: booking.service_price || 0,
+              customer_email: '',
+              customer_phone: '',
+              notes: ''
+            };
+          });
+
+        console.log('Setting upcoming bookings:', formattedBookings);
+        setUpcomingBookings(formattedBookings);
       } catch (error) {
         console.error('Error fetching upcoming bookings:', error);
         Alert.alert('Error', 'Failed to load upcoming bookings');
@@ -172,6 +222,7 @@ export const HomeScreen = () => {
     };
 
     if (professionalId) {
+      console.log('Professional ID available, fetching bookings...');
       fetchUpcomingBookings();
       // Refresh bookings every minute
       const interval = setInterval(fetchUpcomingBookings, 60000);
@@ -292,18 +343,31 @@ export const HomeScreen = () => {
                   >
                     <View style={styles.appointmentHeader}>
                       <View>
-                        <Text style={styles.appointmentDate}>{formatDate(booking.start_time)}</Text>
-                        <Text style={styles.appointmentTime}>{formatTime(booking.start_time)}</Text>
-                      </View>
-                      <View style={styles.statusBadge}>
-                        <Text style={styles.appointmentStatus}>Confirmed</Text>
+                        <Text style={styles.appointmentDate}>
+                          {new Date(booking.start_time).toLocaleDateString('en-GB', {
+                            weekday: 'short',
+                            day: 'numeric',
+                            month: 'short'
+                          })}
+                        </Text>
+                        <Text style={styles.appointmentTime}>
+                          {new Date(booking.start_time).toLocaleTimeString('en-GB', { 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            hour12: false 
+                          })} - {new Date(booking.end_time).toLocaleTimeString('en-GB', { 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            hour12: false 
+                          })}
+                        </Text>
                       </View>
                     </View>
                     <Text style={styles.appointmentClient}>
-                      {`${booking.customer_first_name} ${booking.customer_last_name}`}
+                      {booking.customer_name}
                     </Text>
                     <Text style={styles.appointmentService}>
-                      {`${booking.service_name} - ${booking.service_duration}min`}
+                      {booking.service_name} - £{booking.full_price.toFixed(2)}
                     </Text>
                   </LinearGradient>
                 </View>
@@ -356,14 +420,14 @@ const styles = StyleSheet.create({
     minHeight: 120,
   },
   metricValue: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     marginVertical: 8,
     color: '#1A1A1A',
     textAlign: 'center',
   },
   metricTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '500',
     color: '#666666',
     textAlign: 'center',
@@ -503,5 +567,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#666666',
     marginBottom: 2,
+  },
+  pendingStatusBadge: {
+    backgroundColor: '#FFF3E0',
+  },
+  pendingAppointmentStatus: {
+    color: '#FF9800',
   },
 });

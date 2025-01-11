@@ -441,7 +441,6 @@ export const ProfessionalProfileScreen = () => {
         const imageUri = result.assets[0].uri;
         
         try {
-          // Show loading indicator
           setIsLoading(true);
 
           const fileExtension = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
@@ -467,24 +466,67 @@ export const ProfessionalProfileScreen = () => {
             .from('profile-images')
             .getPublicUrl(filePath);
 
-          // Get professional's profile ID
+          // Check if professional profile exists
           const { data: profile, error: profileError } = await supabase
             .from('professionals')
             .select('id')
             .eq('user_id', user.id)
             .single();
 
-          if (profileError) throw profileError;
+          if (profileError && profileError.code === 'PGRST116') {
+            try {
+              // First, ensure user exists in users table
+              const { data: existingUser, error: userCheckError } = await supabase
+                .from('users')
+                .select('id')
+                .eq('id', user.id)
+                .single();
 
-          // Update the database with the new image URL
-          const { error: updateError } = await supabase
-            .from('professionals')
-            .update({
-              [type === 'banner' ? 'banner_image' : 'profile_image']: publicUrl
-            })
-            .eq('id', profile.id);
+              if (userCheckError) {
+                // User doesn't exist, create them first
+                const { error: createUserError } = await supabase
+                  .from('users')
+                  .insert([{
+                    id: user.id,
+                    email: session?.user?.email,
+                    role: session?.user?.user_metadata?.role || 'professional'
+                  }]);
 
-          if (updateError) throw updateError;
+                if (createUserError) throw createUserError;
+              }
+
+              // Now create the professional profile
+              const { data: newProfile, error: createError } = await supabase
+                .from('professionals')
+                .insert([{
+                  user_id: user.id,
+                  [type === 'banner' ? 'banner_image' : 'profile_image']: publicUrl,
+                  name: session?.user?.user_metadata?.first_name 
+                    ? `${session.user.user_metadata.first_name} ${session.user.user_metadata.last_name}`
+                    : '',
+                  business_name: session?.user?.user_metadata?.business_name || '',
+                  email: session?.user?.email || '',
+                  category: session?.user?.user_metadata?.category || SERVICE_CATEGORIES.HAIR,
+                }])
+                .select()
+                .single();
+
+              if (createError) throw createError;
+            } catch (error) {
+              console.error('Error creating user or professional:', error);
+              throw error;
+            }
+          } else if (!profileError) {
+            // Profile exists, update it
+            const { error: updateError } = await supabase
+              .from('professionals')
+              .update({
+                [type === 'banner' ? 'banner_image' : 'profile_image']: publicUrl
+              })
+              .eq('id', profile.id);
+
+            if (updateError) throw updateError;
+          }
 
           // Update local state
           setProfileData(prev => ({
@@ -657,7 +699,7 @@ export const ProfessionalProfileScreen = () => {
             <Text style={styles.serviceDetailText}>Deposit: £{service.deposit_price}</Text>
           </View>
           <View style={styles.paymentNoteContainer}>
-            <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Prim</Text></Text>
+            <Text style={styles.pricingNote}>Pay on <Text style={styles.primText}>Priim</Text></Text>
           </View>
         </View>
       </View>
@@ -1361,7 +1403,7 @@ const ServiceEditModal = ({ service, onSave, onClose }) => {
             keyboardType="decimal-pad"
           />
           <Text style={styles.paymentNote}>
-            NOTE: Customers will pay deposit via Prim but will pay full price once with the service provider
+            NOTE: Customers will pay deposit via Priim but will pay full price once with the service provider
           </Text>
         </View>
 

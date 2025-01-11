@@ -1,4 +1,4 @@
-# Prim Mobile App
+# Priim Mobile App
 
 A mobile application that connects beauty and wellness professionals with customers, streamlining the booking process and business management.
 

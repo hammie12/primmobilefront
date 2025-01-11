@@ -31,6 +31,8 @@ export type RootStackParamList = {
   BookingRules: undefined;
   CancellationPolicyScreen: undefined;
   PaymentMethodsScreen: undefined;
+  BusinessPaymentMethods: undefined;
+  PayoutSettings: undefined;
   DepositSettings: undefined;
   VATSettings: undefined;
   PushNotifications: undefined;

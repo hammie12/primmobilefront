@@ -15,6 +15,7 @@ import { WelcomeScreen } from './screens/WelcomeScreen';
 import { SignInScreen } from './screens/SignInScreen';
 import { SignUpScreen } from './screens/SignUpScreen';
 import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen';
+import { OnboardingScreen } from './screens/OnboardingScreen';
 
 // Customer Screens
 import { CustomerHomeScreen } from './screens/customer/CustomerHomeScreen';
@@ -51,6 +52,8 @@ import { PrivacyPolicyScreen } from './screens/settings/PrivacyPolicyScreen';
 import { TermsOfServiceScreen } from './screens/settings/TermsOfServiceScreen';
 import { HelpCentreScreen } from './screens/settings/HelpCentreScreen';
 import { ContactSupportScreen } from './screens/settings/ContactSupportScreen';
+import BusinessPaymentMethodsScreen from './screens/settings/BusinessPaymentMethodsScreen';
+import { PayoutSettingsScreen } from './screens/settings/PayoutSettingsScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -289,6 +292,7 @@ const Navigation = () => {
           // Auth Stack
           <>
             <Stack.Screen name="Welcome" component={WelcomeScreen} />
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="SignIn" component={SignInScreen} />
             <Stack.Screen name="SignUp" component={SignUpScreen} />
             <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
@@ -313,6 +317,22 @@ const Navigation = () => {
                 <Stack.Screen name="DepositSettings" component={DepositSettingsScreen} />
                 <Stack.Screen name="CancellationPolicy" component={CancellationPolicyScreen} />
                 <Stack.Screen name="PaymentMethodsScreen" component={PaymentMethodsScreen} />
+                <Stack.Screen 
+                  name="BusinessPaymentMethodsScreen" 
+                  component={BusinessPaymentMethodsScreen}
+                  options={{
+                    headerShown: true,
+                    title: 'Payment Methods'
+                  }}
+                />
+                <Stack.Screen 
+                  name="PayoutSettings" 
+                  component={PayoutSettingsScreen}
+                  options={{
+                    headerShown: true,
+                    title: 'Payout Settings'
+                  }}
+                />
                 <Stack.Screen name="PushNotifications" component={PushNotificationsScreen} />
                 <Stack.Screen name="EmailNotifications" component={EmailNotificationsScreen} />
                 <Stack.Screen name="SMSNotifications" component={SMSNotificationsScreen} />
@@ -387,4 +407,4 @@ const styles = StyleSheet.create({
   },
 });
 
-AppRegistry.registerComponent('PrimMobileFront', () => App);
+AppRegistry.registerComponent('PriimMobileFront', () => App);

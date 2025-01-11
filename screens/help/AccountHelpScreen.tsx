@@ -20,7 +20,7 @@ export const AccountHelpScreen = () => {
           </Typography>
           
           <Typography variant="body1" style={styles.text}>
-            Learn how to manage your Prim account settings and keep your information up to date.
+            Learn how to manage your Priim account settings and keep your information up to date.
           </Typography>
 
           <Typography variant="h2" style={styles.heading}>

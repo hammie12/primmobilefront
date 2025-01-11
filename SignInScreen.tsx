@@ -1,0 +1,1 @@
+redirectTo: 'priim://auth/reset-password', 

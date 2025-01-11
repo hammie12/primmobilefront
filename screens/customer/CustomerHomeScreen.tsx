@@ -18,17 +18,14 @@ interface Professional {
   review_count: number;
   address: string | null;
   distance?: number;
+  description?: string;
 }
 
 interface Booking {
   id: string;
   start_time: string;
-  services: {
-    name: string;
-  };
-  professional_profiles: {
-    business_name: string;
-  };
+  services: Array<{ name: string }>;
+  professional_profiles: Array<{ business_name: string }>;
 }
 
 export const CustomerHomeScreen = () => {
@@ -213,12 +210,8 @@ export const CustomerHomeScreen = () => {
       const formattedBookings = bookings?.map(booking => ({
         id: booking.id,
         start_time: booking.start_time,
-        services: {
-          name: booking.services?.name || 'Service'
-        },
-        professional_profiles: {
-          business_name: booking.professional_profiles?.business_name || 'Business Name'
-        }
+        services: booking.services || [],
+        professional_profiles: booking.professional_profiles || []
       })) || [];
 
       console.log('Formatted upcoming bookings:', formattedBookings);
@@ -239,24 +232,35 @@ export const CustomerHomeScreen = () => {
         .eq('user_id', user.id)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // If the error is "no rows returned", we'll just set firstName to empty string
+        if (error.code === 'PGRST116') {
+          setFirstName('');
+          return;
+        }
+        throw error;
+      }
+      
       if (profile?.first_name) {
         setFirstName(profile.first_name);
+      } else {
+        setFirstName('');
       }
     } catch (error) {
       console.error('Error fetching user name:', error);
+      // Set firstName to empty string on error to ensure the UI still renders
+      setFirstName('');
     }
   };
 
   const handleProfessionalPress = (professional: Professional) => {
-    console.log('CustomerHomeScreen navigating to CustomerViewProfessional with professional:', professional);
     navigation.navigate('CustomerViewProfessional', {
       professionalId: professional.id,
       name: professional.business_name,
       rating: professional.rating,
       category: professional.category,
-      description: professional.about,
-      title: professional.title
+      description: professional.description || '',
+      title: professional.business_name
     });
   };
 
@@ -391,8 +395,11 @@ export const CustomerHomeScreen = () => {
         style={styles.header}
       >
         <View>
+          <Typography variant="body1" style={styles.greeting}>
+            Hello {firstName ? firstName.toLowerCase() : ''}
+          </Typography>
           <Typography variant="h1" style={styles.headerTitle}>
-            Welcome back{firstName ? `, ${firstName}` : ''}
+            Good morning!
           </Typography>
         </View>
       </LinearGradient>
@@ -451,21 +458,20 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingVertical: 16,
     backgroundColor: '#FFF',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+    shadowRadius: 5,
+    elevation: 2,
   },
   headerTitle: {
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '600',
     color: '#1A1A1A',
-    letterSpacing: -0.5,
   },
   content: {
     flex: 1,
@@ -486,15 +492,15 @@ const styles = StyleSheet.create({
   },
   professionalCard: {
     marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 16,
+    marginBottom: 12,
+    padding: 12,
     backgroundColor: '#FFF',
-    borderRadius: 24,
+    borderRadius: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
     borderWidth: 1,
     borderColor: '#F0F0F0',
   },
@@ -504,9 +510,9 @@ const styles = StyleSheet.create({
   },
   professionalImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 20,
-    marginBottom: 16,
+    height: 160,
+    borderRadius: 12,
+    marginBottom: 12,
   },
   professionalInfo: {
     width: '100%',
@@ -608,24 +614,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   categoryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     backgroundColor: '#FFF8F6',
-    borderRadius: 24,
-    borderWidth: 1.5,
+    borderRadius: 20,
+    borderWidth: 1,
     borderColor: '#FFE5E0',
-    marginRight: 10,
-    shadowColor: '#FF5722',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    marginRight: 8,
   },
   categoryText: {
     color: '#FF5722',
-    fontWeight: '700',
-    fontSize: 14,
-    letterSpacing: 0.5,
+    fontWeight: '600',
+    fontSize: 13,
   },
   bookingTimeContainer: {
     flexDirection: 'row',
@@ -660,6 +660,8 @@ const styles = StyleSheet.create({
   },
   selectedCategoryText: {
     color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 13,
   },
   distanceContainer: {
     flexDirection: 'row',
@@ -692,5 +694,10 @@ const styles = StyleSheet.create({
     color: '#FF5722',
     fontWeight: '600',
     marginRight: 8,
+  },
+  greeting: {
+    fontSize: 16,
+    color: '#666666',
+    marginBottom: 4,
   },
 });

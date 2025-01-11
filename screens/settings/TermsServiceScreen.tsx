@@ -15,7 +15,7 @@ const TermsServiceScreen = ({ navigation }) => {
     },
     {
       title: '1. Acceptance of Terms',
-      content: `By accessing and using the PrimMobile application ("the App"), you agree to be bound by these Terms of Service. If you disagree with any part of these terms, you may not access the App.`,
+      content: `By accessing and using the PriimMobile application ("the App"), you agree to be bound by these Terms of Service. If you disagree with any part of these terms, you may not access the App.`,
     },
     {
       title: '2. Use of Service',
@@ -36,19 +36,19 @@ const TermsServiceScreen = ({ navigation }) => {
     },
     {
       title: '5. Payments and Fees',
-      content: `Service providers are responsible for setting their own prices and managing their payment processes. PrimMobile may charge service fees for use of the platform, which will be clearly communicated.`,
+      content: `Service providers are responsible for setting their own prices and managing their payment processes. PriimMobile may charge service fees for use of the platform, which will be clearly communicated.`,
     },
     {
       title: '6. Cancellation Policy',
-      content: `Service providers must establish and communicate clear cancellation policies to their clients. PrimMobile reserves the right to mediate disputes between service providers and clients.`,
+      content: `Service providers must establish and communicate clear cancellation policies to their clients. PriimMobile reserves the right to mediate disputes between service providers and clients.`,
     },
     {
       title: '7. Intellectual Property',
-      content: `The App and its original content, features, and functionality are owned by PrimMobile and are protected by international copyright, trademark, patent, trade secret, and other intellectual property laws.`,
+      content: `The App and its original content, features, and functionality are owned by PriimMobile and are protected by international copyright, trademark, patent, trade secret, and other intellectual property laws.`,
     },
     {
       title: '8. Limitation of Liability',
-      content: `PrimMobile shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use or inability to use the App.`,
+      content: `PriimMobile shall not be liable for any indirect, incidental, special, consequential, or punitive damages resulting from your use or inability to use the App.`,
     },
     {
       title: '9. Changes to Terms',

@@ -81,7 +81,12 @@ export const BusinessSettingsScreen = () => {
           <SettingsItem
             icon="credit-card"
             title="Payment Methods"
-            onPress={() => navigateToScreen('PaymentMethodsScreen')}
+            onPress={() => navigateToScreen('BusinessPaymentMethodsScreen')}
+          />
+          <SettingsItem
+            icon="cash-multiple"
+            title="Payout Settings"
+            onPress={() => navigateToScreen('PayoutSettings')}
           />
         </View>
 

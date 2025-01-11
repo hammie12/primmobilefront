@@ -19,6 +19,8 @@ import { useAuth } from '../../contexts/AuthContext';
 interface RouteParams {
   serviceName: string;
   servicePrice: number;
+  depositPrice: number;
+  fullPrice: number;
   serviceDuration: string;
   professionalName: string;
   selectedDate: string;
@@ -43,6 +45,8 @@ export const BookingPayment = () => {
   const {
     serviceName,
     servicePrice,
+    depositPrice,
+    fullPrice,
     serviceDuration,
     professionalName,
     selectedDate,
@@ -61,7 +65,8 @@ export const BookingPayment = () => {
   console.log('Original Booking Status:', originalBookingStatus);
   console.log('Booking Details:', {
     serviceName,
-    servicePrice,
+    depositPrice,
+    fullPrice,
     serviceDuration,
     professionalName,
     selectedDate,
@@ -198,7 +203,7 @@ export const BookingPayment = () => {
 
       if (isRescheduling && originalBookingId) {
         // Call the reschedule_booking RPC function
-        const { data: bookingData, error: bookingError } = await supabase
+        const { data: rescheduledBooking, error: bookingError } = await supabase
           .rpc('reschedule_booking', {
             p_booking_id: originalBookingId,
             p_new_start_time: startDateTime.toISOString(),
@@ -215,10 +220,34 @@ export const BookingPayment = () => {
           return;
         }
 
-        console.log('Booking rescheduled successfully:', bookingData);
+        console.log('Booking rescheduled successfully:', rescheduledBooking);
+        
+        // Show success message before navigation
+        Alert.alert(
+          'Success',
+          'Your booking has been rescheduled!',
+          [{
+            text: 'OK',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [
+                  {
+                    name: 'CustomerBookings',
+                    params: {
+                      initialTab: 'upcoming',
+                      selectedBookingId: originalBookingId,
+                      refresh: true
+                    }
+                  }
+                ]
+              });
+            }
+          }]
+        );
       } else {
         // Create a new booking
-        const { data: bookingData, error: bookingError } = await supabase
+        const { data: newBooking, error: bookingError } = await supabase
           .rpc('create_simple_booking', {
             p_customer_id: customerProfile.id,
             p_professional_id: professionalProfileId,
@@ -237,12 +266,32 @@ export const BookingPayment = () => {
           return;
         }
 
-        console.log('Booking created successfully:', bookingData);
+        console.log('Booking created successfully:', newBooking);
+        
+        // Show success message before navigation
+        Alert.alert(
+          'Success',
+          'Your booking has been created!',
+          [{
+            text: 'OK',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [
+                  {
+                    name: 'CustomerBookings',
+                    params: {
+                      initialTab: 'upcoming',
+                      selectedBookingId: newBooking?.id,
+                      refresh: true
+                    }
+                  }
+                ]
+              });
+            }
+          }]
+        );
       }
-
-      // Success
-      navigation.navigate('CustomerBookings');
-      Alert.alert('Success', isRescheduling ? 'Your booking has been rescheduled!' : 'Your booking has been created!');
     } catch (error) {
       console.error('Error in booking creation:', error);
       Alert.alert('Error', 'An unexpected error occurred. Please try again.');
@@ -289,8 +338,18 @@ export const BookingPayment = () => {
               <Text style={styles.detailText}>{serviceDuration} minutes</Text>
             </View>
             <View style={[styles.detailRow, styles.totalRow]}>
-              <Text style={styles.totalLabel}>Total:</Text>
-              <Text style={styles.totalAmount}>£{servicePrice}</Text>
+              <View style={styles.priceContainer}>
+                <View style={styles.priceRow}>
+                  <Text style={styles.totalLabel}>Full Price:</Text>
+                  <Text style={styles.totalAmount}>£{fullPrice}</Text>
+                </View>
+                <Text style={styles.paymentNote}>Pay to service provider</Text>
+                <View style={[styles.priceRow, styles.depositRow]}>
+                  <Text style={styles.totalLabel}>Deposit:</Text>
+                  <Text style={styles.totalAmount}>£{depositPrice}</Text>
+                </View>
+                <Text style={styles.paymentNote}>Pay on <Text style={styles.primText}>Priim</Text></Text>
+              </View>
             </View>
           </View>
 
@@ -455,6 +514,28 @@ const styles = StyleSheet.create({
   payButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  priceContainer: {
+    width: '100%',
+    gap: 8,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  depositRow: {
+    marginTop: 12,
+  },
+  paymentNote: {
+    fontSize: 12,
+    color: '#666666',
+    fontStyle: 'italic',
+    textAlign: 'right',
+  },
+  primText: {
+    color: '#FF5722',
     fontWeight: '600',
   },
 }); 

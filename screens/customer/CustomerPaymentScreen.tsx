@@ -88,7 +88,7 @@ export const CustomerPaymentScreen = () => {
       console.log('Initializing payment sheet with client secret:', clientSecret);
       const { error: initError } = await initPaymentSheet({
         setupIntentClientSecret: clientSecret,
-        merchantDisplayName: 'Prim Beauty',
+        merchantDisplayName: 'Priim Beauty',
         style: 'automatic',
         returnURL: 'primmobile://stripe-redirect',
         defaultBillingDetails: {

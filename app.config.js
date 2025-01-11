@@ -16,7 +16,7 @@ export default {
     ],
     ios: {
       supportsTablet: true,
-      bundleIdentifier: "com.primmobile.app",
+      bundleIdentifier: "com.priimmobile.app",
       buildNumber: "1.0.0"
     },
     android: {

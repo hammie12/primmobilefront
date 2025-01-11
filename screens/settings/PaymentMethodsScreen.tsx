@@ -88,7 +88,7 @@ export const PaymentMethodsScreen = () => {
       console.log('Initializing payment sheet with client secret:', clientSecret);
       const { error: initError } = await initPaymentSheet({
         setupIntentClientSecret: clientSecret,
-        merchantDisplayName: 'Prim Beauty',
+        merchantDisplayName: 'Priim Beauty',
         style: 'automatic',
         returnURL: 'primmobile://stripe-redirect',
         defaultBillingDetails: {
@@ -287,7 +287,7 @@ export const PaymentMethodsScreen = () => {
       console.log('Initializing payment sheet for editing with client secret:', clientSecret);
       const { error: initError } = await initPaymentSheet({
         setupIntentClientSecret: clientSecret,
-        merchantDisplayName: 'Prim Beauty',
+        merchantDisplayName: 'Priim Beauty',
         style: 'automatic',
         returnURL: 'primmobile://stripe-redirect',
         defaultBillingDetails: {

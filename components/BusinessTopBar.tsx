@@ -19,7 +19,7 @@ export const BusinessTopBar = () => {
     <View style={styles.container}>
       <View style={styles.leftSection}>
         <Typography variant="h1" style={styles.title}>
-          Prim Business
+          Priim Business
         </Typography>
       </View>
       <View style={styles.rightSection}>
